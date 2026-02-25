@@ -30,7 +30,7 @@ pub fn view<'a>(form: &'a MetadataForm) -> Element<'a, Message> {
             column![
                 // Header
                 row![
-                    text("Editar Comic").size(20),
+                    text("Editar Comic").size(20).color(iced::Color::WHITE),
                     Space::with_width(Length::Fill),
                     button(text("✕").size(16))
                         .padding(4)
@@ -45,7 +45,7 @@ pub fn view<'a>(form: &'a MetadataForm) -> Element<'a, Message> {
                 
                 // Title field
                 column![
-                    text("Título").size(13),
+                    text("Título").size(13).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
                     text_input("Título del comic", &form.title)
                         .on_input(Message::EditorTitleChanged)
                         .padding(10)
@@ -56,7 +56,7 @@ pub fn view<'a>(form: &'a MetadataForm) -> Element<'a, Message> {
                 // Year and Issue row
                 row![
                     column![
-                        text("Año").size(13),
+                        text("Año").size(13).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
                         text_input("2024", &form.year)
                             .on_input(Message::EditorYearChanged)
                             .padding(10)
@@ -65,7 +65,7 @@ pub fn view<'a>(form: &'a MetadataForm) -> Element<'a, Message> {
                     .spacing(4)
                     .width(Length::Fill),
                     column![
-                        text("Número").size(13),
+                        text("Número").size(13).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
                         text_input("#1", &form.issue_number)
                             .on_input(Message::EditorIssueChanged)
                             .padding(10)
@@ -78,7 +78,7 @@ pub fn view<'a>(form: &'a MetadataForm) -> Element<'a, Message> {
                 
                 // Saga field
                 column![
-                    text("Saga").size(13),
+                    text("Saga").size(13).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
                     text_input("Nombre de la saga", &form.saga)
                         .on_input(Message::EditorSagaChanged)
                         .padding(10)

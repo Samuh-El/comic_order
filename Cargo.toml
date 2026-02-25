@@ -18,7 +18,7 @@ image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 # HTTP Server for remote access
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.5", features = ["cors", "fs"] }
+tower-http = { version = "0.5", features = ["cors", "fs", "limit"] }
 
 # QR Code
 qrcode = "0.14"

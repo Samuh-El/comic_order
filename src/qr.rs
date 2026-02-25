@@ -25,10 +25,16 @@ pub fn generate_qr_image(url: &str, size: u32) -> Option<(Vec<u8>, u32, u32)> {
     Some((rgba, width, height))
 }
 
-/// Get the local IP address for the server URL
-pub fn get_server_url(port: u16) -> String {
-    match local_ip_address::local_ip() {
+/// Get the local IP address for the server URL with an optional security token
+pub fn get_server_url(port: u16, token: Option<&str>) -> String {
+    let base = match local_ip_address::local_ip() {
         Ok(ip) => format!("http://{}:{}", ip, port),
         Err(_) => format!("http://127.0.0.1:{}", port),
+    };
+
+    if let Some(t) = token {
+        format!("{}/?token={}", base, t)
+    } else {
+        base
     }
 }

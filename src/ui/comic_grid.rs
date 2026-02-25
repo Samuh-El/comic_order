@@ -13,8 +13,8 @@ pub fn view<'a>(
     let header = container(
         row![
             column![
-                text(collection_name).size(24),
-                text(format!("{} comics", comics.len())).size(13),
+                text(collection_name).size(24).color(iced::Color::WHITE),
+                text(format!("{} comics", comics.len())).size(13).color(iced::Color::from_rgb(0.7, 0.7, 0.7)),
             ]
             .spacing(4),
             Space::with_width(Length::Fill),
@@ -126,7 +126,9 @@ pub fn view<'a>(
         } else {
             comic.title.clone()
         };
-        card_content = card_content.push(text(title_text).size(12));
+        card_content = card_content.push(
+            text(title_text).size(12).color(iced::Color::WHITE)
+        );
 
         // Meta info
         let mut meta = String::new();
@@ -142,7 +144,9 @@ pub fn view<'a>(
         if meta.is_empty() {
             meta = comic.file_type.to_uppercase();
         }
-        card_content = card_content.push(text(meta).size(11));
+        card_content = card_content.push(
+            text(meta).size(11).color(iced::Color::from_rgb(0.8, 0.8, 0.8))
+        );
 
         let comic_id = comic.id;
 

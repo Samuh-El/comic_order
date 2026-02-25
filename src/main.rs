@@ -57,7 +57,7 @@ fn main() -> iced::Result {
 }
 
 fn load_icon() -> Option<iced::window::icon::Icon> {
-    let icon_bytes = include_bytes!("../assets/icon.png");
+    let icon_bytes = include_bytes!("../assets/wow-icon.png");
     let img = ::image::load_from_memory(icon_bytes).ok()?.to_rgba8();
     let (width, height) = ::image::GenericImageView::dimensions(&img);
     iced::window::icon::from_rgba(img.into_raw(), width, height).ok()
@@ -101,8 +101,10 @@ struct ComicApp {
     // Server
     server_running: bool,
     server_url: Option<String>,
+    server_token: Option<String>,
     qr_handle: Option<image::Handle>,
     show_qr: bool,
+    shutdown_sender: Option<tokio::sync::oneshot::Sender<()>>,
 
     // Collection context menu
     context_menu_collection: Option<i64>,
@@ -159,6 +161,8 @@ pub enum Message {
     // Server
     ToggleServer,
     ServerStarted,
+    StopServer,
+    CloseQR,
 
     // Scanning
     ScanComplete(Result<Vec<Comic>, String>),
@@ -187,6 +191,7 @@ impl ComicApp {
             editing_form: None,
             server_running: false,
             server_url: None,
+            server_token: None,
             qr_handle: None,
             show_qr: false,
             context_menu_collection: None,
@@ -194,6 +199,7 @@ impl ComicApp {
             rename_input: String::new(),
             is_scanning: false,
             is_loading_page: false,
+            shutdown_sender: None,
         };
 
         let task = Task::perform(
@@ -643,19 +649,22 @@ impl ComicApp {
 
             Message::ToggleServer => {
                 if self.server_running {
-                    info!("Deteniendo servidor HTTP");
-                    self.server_running = false;
-                    self.show_qr = false;
-                    self.server_url = None;
-                    self.qr_handle = None;
+                    // Just show QR if already running
+                    self.show_qr = true;
                 } else {
                     if let Some(db) = &self.db {
                         let db = db.clone();
                         let port = SERVER_PORT;
+                        
+                        // Generate a secure session token
+                        let token = uuid::Uuid::new_v4().to_string().replace("-", "")[..16].to_string();
+                        info!("Token de seguridad generado: ******");
+                        
                         self.server_running = true;
-                        let url = qr::get_server_url(port);
+                        let url = qr::get_server_url(port, Some(&token));
                         info!("Iniciando servidor HTTP en {}", url);
                         self.server_url = Some(url.clone());
+                        self.server_token = Some(token.clone());
                         self.show_qr = true;
 
                         // Generate QR
@@ -664,17 +673,24 @@ impl ComicApp {
                             self.qr_handle = Some(image::Handle::from_rgba(w, h, data));
                         }
 
+                        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+                        self.shutdown_sender = Some(tx);
+
                         return Task::perform(
                             async move {
-                                let state = server::ServerState { db };
+                                let state = server::ServerState { db, token };
                                 let router = server::create_router(state);
                                 let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
                                     .await
                                     .expect("Cannot bind to port");
                                 info!("Servidor HTTP escuchando en 0.0.0.0:{}", port);
-                                tokio::spawn(async move {
-                                    axum::serve(listener, router).await.ok();
-                                });
+                                
+                                axum::serve(listener, router)
+                                    .with_graceful_shutdown(async move {
+                                        rx.await.ok();
+                                        info!("Apagando servidor HTTP Axum...");
+                                    })
+                                    .await.ok();
                             },
                             |_| Message::ServerStarted,
                         );
@@ -684,6 +700,22 @@ impl ComicApp {
 
             Message::ServerStarted => {
                 info!("Servidor HTTP iniciado correctamente");
+            }
+
+            Message::StopServer => {
+                info!("Deteniendo servidor HTTP por petición del usuario");
+                if let Some(tx) = self.shutdown_sender.take() {
+                    let _ = tx.send(());
+                }
+                self.server_running = false;
+                self.show_qr = false;
+                self.server_url = None;
+                self.server_token = None;
+                self.qr_handle = None;
+            }
+
+            Message::CloseQR => {
+                self.show_qr = false;
             }
 
             Message::KeyPressed(key) => {
@@ -743,7 +775,7 @@ impl ComicApp {
                     .center_y(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgb(
-                            0.06, 0.06, 0.10,
+                            0.20, 0.20, 0.22,
                         ))),
                         ..Default::default()
                     })
@@ -780,13 +812,17 @@ impl ComicApp {
                 } else if self.selected_collection_id.is_some() {
                     ui::comic_grid::view(&self.comics, &self.selected_collection_name, &self.comic_handles, self.is_scanning)
                 } else {
+                    let logo_icon = include_bytes!("../assets/wow-icon.png");
+                    let logo_handle = image::Handle::from_bytes(logo_icon.as_slice());
+
                     container(
                         column![
-                            text("COMIC").size(32),
-                            text("Selecciona o crea una coleccion").size(18),
-                            text("Usa el panel izquierdo para gestionar tus colecciones").size(13),
+                            image(logo_handle).width(100).height(100),
+                            text("COMIC").size(32).color(iced::Color::WHITE),
+                            text("Selecciona o crea una coleccion").size(18).color(iced::Color::from_rgb(0.8, 0.8, 0.8)),
+                            text("Usa el panel izquierdo para gestionar tus colecciones").size(13).color(iced::Color::from_rgb(0.6, 0.6, 0.6)),
                         ]
-                        .spacing(10)
+                        .spacing(15)
                         .align_x(iced::Alignment::Center),
                     )
                     .width(Length::Fill)
@@ -801,7 +837,7 @@ impl ComicApp {
                     .height(Length::Fill)
                     .style(|_theme: &Theme| container::Style {
                         background: Some(iced::Background::Color(iced::Color::from_rgb(
-                            0.06, 0.06, 0.10,
+                            0.20, 0.20, 0.22,
                         ))),
                         ..Default::default()
                     });
@@ -928,7 +964,7 @@ impl ComicApp {
         content = content.push(
             iced::widget::button(text("Cerrar").size(14))
                 .padding([8, 20])
-                .on_press(Message::ToggleServer)
+                .on_press(Message::CloseQR)
                 .style(|_theme: &Theme, _status| iced::widget::button::Style {
                     background: Some(iced::Background::Color(iced::Color::from_rgb(
                         0.91, 0.27, 0.37,

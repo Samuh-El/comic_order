@@ -1,5 +1,6 @@
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct Collection {
@@ -39,8 +40,14 @@ impl Database {
             .max_connections(5)
             .connect(url)
             .await?;
+        
+        info!("[DB] Conectado exitosamente a: {}", url);
+        if let Ok(path) = std::env::current_dir() {
+            info!("[DB] Directorio de trabajo actual: {:?}", path);
+        }
 
         let db = Self { pool };
+        sqlx::query("PRAGMA journal_mode=WAL;").execute(&db.pool).await?;
         db.initialize_schema().await?;
         Ok(db)
     }

@@ -31,9 +31,9 @@ pub fn view<'a>(
                 ..Default::default()
             }),
             Space::with_width(Length::Fill),
-            text(comic_title).size(14),
+            text(comic_title).size(14).color(iced::Color::WHITE),
             Space::with_width(Length::Fill),
-            text(format!("{} / {}", current_page + 1, total_pages)).size(14),
+            text(format!("{} / {}", current_page + 1, total_pages)).size(14).color(iced::Color::from_rgb(0.8, 0.8, 0.8)),
         ]
         .align_y(Alignment::Center)
         .spacing(10),
@@ -112,7 +112,7 @@ pub fn view<'a>(
                     ..Default::default()
                 }),
             Space::with_width(Length::Fill),
-            text("Flechas: ← / →").size(11),
+            text("Flechas: ← / →").size(11).color(iced::Color::from_rgb(0.6, 0.6, 0.6)),
             Space::with_width(Length::Fill),
             button(text("Siguiente ▶").size(14))
                 .padding([10, 20])
