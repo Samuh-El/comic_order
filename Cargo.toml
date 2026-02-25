@@ -1,0 +1,37 @@
+[package]
+name = "comic"
+version = "0.1.0"
+edition = "2021"
+description = "App para gestionar y leer comics"
+
+[dependencies]
+# GUI
+iced = { version = "0.13", features = ["image", "tokio"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "mysql", "macros"] }
+
+# Comic file reading
+zip = "2.2"
+image = { version = "0.25", features = ["jpeg", "png", "webp"] }
+
+# HTTP Server for remote access
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+
+# QR Code
+qrcode = "0.14"
+
+# Utilities
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+local-ip-address = "0.6"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+mime_guess = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-appender = "0.2"
+unrar = "0.5"

@@ -1,0 +1,2 @@
+    Checking comic v0.1.0 (C:\Users\Samuel\Downloads\comic)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.77s
