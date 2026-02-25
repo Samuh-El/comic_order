@@ -6,7 +6,7 @@ Comic es una app para gestionar y leer comics, escrito en Rust.
 
 - Rust
 - Iced (para la UI)
-- MySql (BD)
+- SQLite (BD local)
 
 ## Características
 
@@ -18,34 +18,19 @@ Comic es una app para gestionar y leer comics, escrito en Rust.
 ## Funcionamiento
 
 - El usuario crea una colección de comics, agregando rutas a ellas.
-- La app lee los comics (cbr, cbz, pdf, etc) y los organiza en la base de datos.
+- La app lee los comics (cbr, cbz, pdf, etc) y los organiza en la base de datos local.
 - El usuario puede hacer click para leerlo.
 - El usuario puede dar acceso a otros para leer desde otro dispositivo, usando esta app como servidor. Esta vinculación se hace a través de un código QR.
 
 ## Requisitos
 
 - **Rust** (stable) — [https://rustup.rs](https://rustup.rs)
-- **MySQL 8+** corriendo en `localhost:3306`
 - **Visual Studio Build Tools 2022** con el componente "Desarrollo de escritorio con C++" (necesario para compilar en Windows)
 - **Windows 11 SDK** (se instala junto con VS Build Tools)
 
-## Crear la Base de Datos
+## Base de Datos
 
-Ejecuta en una terminal de MySQL:
-
-```sql
-CREATE DATABASE IF NOT EXISTS comic_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-O por línea de comandos:
-
-```bash
-mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS comic_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-```
-
-> Si tu usuario `root` no tiene contraseña, omite el `-p`.
-
-> **Nota:** Las tablas (`collections`, `collection_paths`, `comics`) se crean automáticamente al iniciar la app.
+La aplicación utiliza **SQLite**, por lo que no es necesario instalar un servidor de base de datos como MySQL. El archivo de base de datos (`comic.db`) se crea automáticamente en la raíz del proyecto al iniciar la aplicación.
 
 ## Compilar y Ejecutar
 
@@ -67,24 +52,11 @@ cargo run
 
 ## Configuración
 
-La app se conecta por defecto a:
+La app utiliza por defecto el archivo `comic.db` en la raíz del proyecto. El servidor HTTP para acceso remoto escucha en el puerto `8080`.
 
-| Parámetro | Valor |
-|-----------|-------|
-| Host MySQL | `localhost` |
-| Puerto MySQL | `3306` |
-| Usuario | `root` |
-| Contraseña | *(vacía)* |
-| Base de datos | `comic_db` |
-| Puerto servidor HTTP | `8080` |
-
-Para cambiar estos valores, edita las constantes en `src/main.rs`:
+Para cambiar el puerto del servidor, edita la constante en `src/main.rs`:
 
 ```rust
-// Sin contraseña:
-const DB_URL: &str = "mysql://root@localhost:3306/comic_db";
-// Con contraseña:
-const DB_URL: &str = "mysql://root:tu_password@localhost:3306/comic_db";
 const SERVER_PORT: u16 = 8080;
 ```
 
@@ -124,15 +96,3 @@ La app puede funcionar como servidor para que otros dispositivos lean los comics
 ```powershell
 New-NetFirewallRule -DisplayName "Comic Reader" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
 ```
-
-## Logs
-
-La app genera logs automáticamente en la carpeta `log/` en la raíz del proyecto. Los archivos de log se rotan diariamente con el formato `comic.log.YYYY-MM-DD`.
-
-Los logs incluyen:
-- Conexiones a la base de datos
-- Creación y selección de colecciones
-- Escaneo de carpetas y detección de comics
-- Apertura y navegación de comics
-- Peticiones HTTP del servidor remoto (`GET /api/...`)
-- Errores y advertencias

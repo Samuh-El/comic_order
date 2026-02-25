@@ -14,7 +14,7 @@ use tracing::{info, warn, error, debug};
 use db::{Collection, Comic, Database};
 use ui::metadata_editor::MetadataForm;
 
-const DB_URL: &str = "mysql://root:root@localhost:3306/comic_db";
+const DB_URL: &str = "sqlite://comic.db?mode=rwc";
 const SERVER_PORT: u16 = 8080;
 
 fn main() -> iced::Result {
@@ -213,7 +213,7 @@ impl ComicApp {
             Message::DbConnected(result) => {
                 match result {
                     Ok(db) => {
-                        info!("Conexión a MySQL establecida correctamente");
+                        info!("Conexión a SQLite establecida correctamente");
                         self.db = Some(db.clone());
                         self.view = AppView::Main;
                         return Task::perform(
@@ -222,8 +222,8 @@ impl ComicApp {
                         );
                     }
                     Err(e) => {
-                        error!("Error conectando a MySQL: {}", e);
-                        self.error_message = Some(format!("Error de BD: {}. ¿MySQL está corriendo?", e));
+                        error!("Error conectando a SQLite: {}", e);
+                        self.error_message = Some(format!("Error de BD: {}. Verifique el archivo comic.db", e));
                         self.view = AppView::Main;
                     }
                 }
@@ -767,7 +767,7 @@ impl ComicApp {
                         column![
                             text("⚠️ Error de Conexión").size(24),
                             text(err).size(14),
-                            text("Asegúrate de que MySQL está corriendo en localhost:3306").size(12),
+                            text("Asegúrate de que el archivo comic.db no esté bloqueado").size(12),
                         ]
                         .spacing(10)
                         .align_x(iced::Alignment::Center),

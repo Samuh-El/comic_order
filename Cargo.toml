@@ -9,7 +9,7 @@ description = "App para gestionar y leer comics"
 iced = { version = "0.13", features = ["image", "tokio"] }
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "mysql", "macros"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros"] }
 
 # Comic file reading
 zip = "2.2"

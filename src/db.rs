@@ -1,4 +1,4 @@
-use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
 #[derive(Debug, Clone)]
@@ -30,26 +30,12 @@ pub struct Comic {
 
 #[derive(Debug, Clone)]
 pub struct Database {
-    pool: MySqlPool,
+    pool: SqlitePool,
 }
 
 impl Database {
     pub async fn connect(url: &str) -> Result<Self, sqlx::Error> {
-        // First connect without database to create it if needed
-        let base_url = url.rsplitn(2, '/').last().unwrap_or(url);
-        let db_name = url.rsplit('/').next().unwrap_or("comic_db");
-
-        if let Ok(base_pool) = MySqlPoolOptions::new()
-            .max_connections(1)
-            .connect(base_url)
-            .await
-        {
-            let query = format!("CREATE DATABASE IF NOT EXISTS `{}`", db_name);
-            let _ = sqlx::query(&query).execute(&base_pool).await;
-            base_pool.close().await;
-        }
-
-        let pool = MySqlPoolOptions::new()
+        let pool = SqlitePoolOptions::new()
             .max_connections(5)
             .connect(url)
             .await?;
@@ -62,9 +48,9 @@ impl Database {
     async fn initialize_schema(&self) -> Result<(), sqlx::Error> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS collections (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )"
         )
         .execute(&self.pool)
@@ -72,8 +58,8 @@ impl Database {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS collection_paths (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                collection_id BIGINT NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
                 path TEXT NOT NULL,
                 FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
             )"
@@ -83,18 +69,18 @@ impl Database {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS comics (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                collection_id BIGINT NOT NULL,
-                title VARCHAR(500) NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
                 file_path TEXT NOT NULL,
-                file_type VARCHAR(10) NOT NULL,
-                year INT NULL,
-                issue_number INT NULL,
-                saga VARCHAR(255) NULL,
-                cover_data LONGBLOB NULL,
-                page_count INT NOT NULL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                file_type TEXT NOT NULL,
+                year INTEGER NULL,
+                issue_number INTEGER NULL,
+                saga TEXT NULL,
+                cover_data BLOB NULL,
+                page_count INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
             )"
         )
@@ -125,7 +111,7 @@ impl Database {
             .bind(name)
             .execute(&self.pool)
             .await?;
-        Ok(result.last_insert_id() as i64)
+        Ok(result.last_insert_rowid() as i64)
     }
 
     pub async fn delete_collection(&self, id: i64) -> Result<(), sqlx::Error> {
@@ -169,7 +155,7 @@ impl Database {
             .bind(path)
             .execute(&self.pool)
             .await?;
-        Ok(result.last_insert_id() as i64)
+        Ok(result.last_insert_rowid() as i64)
     }
 
     // === Comics ===
@@ -231,7 +217,7 @@ impl Database {
             .bind(comic.page_count)
             .execute(&self.pool)
             .await?;
-            Ok(result.last_insert_id() as i64)
+            Ok(result.last_insert_rowid() as i64)
         }
     }
 
