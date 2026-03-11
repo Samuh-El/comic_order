@@ -6,7 +6,7 @@ description = "App para gestionar y leer comics"
 
 [dependencies]
 # GUI
-iced = { version = "0.13", features = ["image", "tokio"] }
+iced = { version = "0.13", features = ["image", "tokio", "canvas"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros"] }

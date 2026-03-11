@@ -1,5 +1,6 @@
-use iced::widget::{button, column, container, image, row, scrollable, text, Space};
-use iced::{Alignment, Element, Length, Theme};
+use iced::widget::{button, column, container, image, row, scrollable, text, Space, stack, canvas};
+use iced::{Alignment, Element, Length, Theme, Color, Point, Renderer};
+use iced::widget::canvas::{Program, Geometry, Frame};
 
 use crate::db::Comic;
 use crate::Message;
@@ -10,6 +11,10 @@ pub fn view<'a>(
     comic_handles: &'a std::collections::HashMap<i64, iced::widget::image::Handle>,
     is_loading: bool,
 ) -> Element<'a, Message> {
+    let background = canvas(MeshGradient)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
     let header = container(
         row![
             column![
@@ -26,8 +31,8 @@ pub fn view<'a>(
             .padding([8, 14])
             .on_press(Message::AddPath)
             .style(|_theme: &Theme, _status| button::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgb(
-                    0.91, 0.27, 0.37,
+                background: Some(iced::Background::Color(iced::Color::from_rgba(
+                    0.91, 0.27, 0.37, 0.8
                 ))),
                 text_color: iced::Color::WHITE,
                 border: iced::Border {
@@ -40,7 +45,24 @@ pub fn view<'a>(
         .spacing(10)
         .align_y(Alignment::Center),
     )
-    .padding(20);
+    .padding(20)
+    .style(|_theme: &Theme| container::Style {
+        background: Some(iced::Background::Color(iced::Color::from_rgba(0.12, 0.12, 0.15, 0.6))),
+        ..Default::default()
+    });
+
+    let continue_reading = container(
+        text("Continue Reading...")
+            .size(28)
+            .font(iced::Font::with_name("Segoe UI Semibold"))
+            .color(iced::Color::WHITE)
+    )
+    .padding(iced::Padding {
+        top: 20.0,
+        right: 20.0,
+        bottom: 10.0,
+        left: 20.0,
+    });
 
     if is_loading {
         let spinner = container(
@@ -172,12 +194,12 @@ pub fn view<'a>(
         )
         .padding(10)
         .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgb(
-                0.1, 0.1, 0.18,
+            background: Some(iced::Background::Color(iced::Color::from_rgba(
+                0.15, 0.15, 0.22, 0.5,
             ))),
             border: iced::Border {
                 radius: 12.0.into(),
-                color: iced::Color::from_rgb(0.15, 0.15, 0.25),
+                color: iced::Color::from_rgba(0.25, 0.25, 0.35, 0.3),
                 width: 1.0,
             },
             ..Default::default()
@@ -196,7 +218,59 @@ pub fn view<'a>(
         grid = grid.push(current_row);
     }
 
-    column![header, scrollable(grid).height(Length::Fill)]
-        .height(Length::Fill)
-        .into()
+    let content = column![header, continue_reading, scrollable(grid).height(Length::Fill)]
+        .height(Length::Fill);
+
+    stack![background, content].into()
+}
+
+struct MeshGradient;
+
+impl<Message> Program<Message> for MeshGradient {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+
+        // Fill background
+        frame.fill_rectangle(Point::ORIGIN, bounds.size(), Color::from_rgb(0.08, 0.08, 0.1));
+
+        // Draw multiple overlapping radial gradients for "Mesh" effect
+        let colors = [
+            (Color::from_rgb(0.15, 0.1, 0.25), Point::new(0.2, 0.2)),
+            (Color::from_rgb(0.25, 0.1, 0.15), Point::new(0.8, 0.3)),
+            (Color::from_rgb(0.1, 0.2, 0.2), Point::new(0.3, 0.8)),
+            (Color::from_rgb(0.2, 0.05, 0.1), Point::new(0.7, 0.7)),
+        ];
+
+        for (color, pos_factor) in colors {
+            let start = Point::new(bounds.width * pos_factor.x, bounds.height * pos_factor.y);
+            let end = Point::new(bounds.width * (pos_factor.x + 0.2), bounds.height * (pos_factor.y + 0.2));
+
+            let grad = canvas::Gradient::Linear(canvas::gradient::Linear {
+                start,
+                end,
+                stops: [
+                    Some(iced::gradient::ColorStop { offset: 0.0, color: Color { a: 0.4, ..color } }),
+                    Some(iced::gradient::ColorStop { offset: 1.0, color: Color { a: 0.0, ..color } }),
+                    None, None, None, None, None, None
+                ],
+            });
+
+            frame.fill_rectangle(
+                Point::ORIGIN,
+                bounds.size(),
+                grad
+            );
+        }
+
+        vec![frame.into_geometry()]
+    }
 }

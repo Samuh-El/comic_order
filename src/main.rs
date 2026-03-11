@@ -6,7 +6,7 @@ mod ui;
 
 use std::collections::HashMap;
 
-use iced::widget::{column, container, image, row, stack, text};
+use iced::widget::{button, column, container, image, row, stack, text};
 use iced::keyboard;
 use iced::{Element, Font, Length, Subscription, Task, Theme};
 use tracing::{info, warn, error, debug};
@@ -22,7 +22,12 @@ fn main() -> iced::Result {
     let log_dir = std::path::Path::new("log");
     std::fs::create_dir_all(log_dir).expect("No se pudo crear el directorio de logs");
 
-    let file_appender = tracing_appender::rolling::daily(log_dir, "comic.log");
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .filename_prefix("comic")
+        .filename_suffix("log")
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .build(log_dir)
+        .expect("No se pudo inicializar el appender de archivos");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::fmt()
@@ -110,6 +115,18 @@ struct ComicApp {
     context_menu_collection: Option<i64>,
     renaming_collection: Option<i64>,
     rename_input: String,
+
+    // UI State
+    is_sidebar_open: bool,
+    current_time: String,
+
+    // Reader state (Zoom/Pan)
+    zoom: f32,
+    pan: iced::Vector,
+    is_dragging: bool,
+    last_mouse_pos: iced::Point,
+    drag_start_pos: iced::Point,
+    show_reader_controls: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +168,9 @@ pub enum Message {
     // Editor
     EditComic(i64),
     EditorTitleChanged(String),
+
+    // Reader interactions
+    CanvasClicked,
     EditorYearChanged(String),
     EditorIssueChanged(String),
     EditorSagaChanged(String),
@@ -169,6 +189,17 @@ pub enum Message {
 
     // Keyboard
     KeyPressed(keyboard::Key),
+
+    // UI Controls
+    ToggleSidebar,
+    ToggleReaderControls,
+    Tick(chrono::DateTime<chrono::Local>),
+
+    // Mouse Events for Reader
+    MouseScrolled(f32),
+    MousePressed(iced::mouse::Button),
+    MouseReleased(iced::mouse::Button),
+    MouseMoved(iced::Point),
 }
 
 impl ComicApp {
@@ -200,6 +231,16 @@ impl ComicApp {
             is_scanning: false,
             is_loading_page: false,
             shutdown_sender: None,
+            is_sidebar_open: true,
+            current_time: chrono::Local::now()
+                .format("%I:%M %p  %a %b %d")
+                .to_string(),
+            zoom: 1.0,
+            pan: iced::Vector::default(),
+            is_dragging: false,
+            last_mouse_pos: iced::Point::ORIGIN,
+            drag_start_pos: iced::Point::ORIGIN,
+            show_reader_controls: true,
         };
 
         let task = Task::perform(
@@ -212,6 +253,37 @@ impl ComicApp {
         );
 
         (app, task)
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        let clock = iced::time::every(std::time::Duration::from_secs(1)).map(|_| {
+            Message::Tick(chrono::Local::now())
+        });
+
+        let keyboard = keyboard::on_key_press(|key, _modifiers| {
+            Some(Message::KeyPressed(key))
+        });
+
+        let mouse = if self.view == AppView::Reader {
+            iced::event::listen_with(|event, _status, _id| {
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                        match delta {
+                            iced::mouse::ScrollDelta::Lines { y, .. } => Some(Message::MouseScrolled(y)),
+                            iced::mouse::ScrollDelta::Pixels { y, .. } => Some(Message::MouseScrolled(y / 20.0)),
+                        }
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)) => Some(Message::MousePressed(button)),
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(button)) => Some(Message::MouseReleased(button)),
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Message::MouseMoved(position)),
+                    _ => None,
+                }
+            })
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch(vec![clock, keyboard, mouse])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -233,6 +305,18 @@ impl ComicApp {
                         self.view = AppView::Main;
                     }
                 }
+            }
+
+            Message::Tick(now) => {
+                self.current_time = now.format("%I:%M %p  %a %b %d").to_string();
+            }
+
+            Message::ToggleSidebar => {
+                self.is_sidebar_open = !self.is_sidebar_open;
+            }
+
+            Message::ToggleReaderControls => {
+                self.show_reader_controls = !self.show_reader_controls;
             }
 
             Message::CollectionsLoaded(collections) => {
@@ -509,6 +593,9 @@ impl ComicApp {
                     self.view = AppView::Reader;
                     self.is_loading_page = true;
                     self.page_handle = None;
+                    self.zoom = 1.0;
+                    self.pan = iced::Vector::default();
+                    self.show_reader_controls = true;
 
                     return Task::perform(
                         async move { comic_reader::get_full_page(&file_path, 0) },
@@ -563,6 +650,9 @@ impl ComicApp {
                 self.view = AppView::Main;
                 self.reading_comic = None;
                 self.page_handle = None;
+                self.zoom = 1.0;
+                self.pan = iced::Vector::default();
+                self.show_reader_controls = true;
             }
 
             Message::EditComic(id) => {
@@ -718,6 +808,53 @@ impl ComicApp {
                 self.show_qr = false;
             }
 
+            Message::MouseScrolled(delta) => {
+                if self.view == AppView::Reader {
+                    if delta > 0.0 {
+                        self.zoom *= 1.1;
+                    } else {
+                        self.zoom /= 1.1;
+                    }
+                    self.zoom = self.zoom.clamp(0.1, 5.0);
+                    
+                    // Adjust pan to zoom towards center? Simple for now
+                    if self.zoom == 1.0 {
+                        self.pan = iced::Vector::new(0.0, 0.0);
+                    }
+                }
+            }
+
+            Message::MousePressed(button) => {
+                if self.view == AppView::Reader && button == iced::mouse::Button::Left {
+                    self.is_dragging = true;
+                    self.drag_start_pos = self.last_mouse_pos;
+                }
+            }
+
+            Message::MouseReleased(button) => {
+                if button == iced::mouse::Button::Left {
+                    self.is_dragging = false;
+                }
+            }
+
+            Message::CanvasClicked => {
+                let dx = self.last_mouse_pos.x - self.drag_start_pos.x;
+                let dy = self.last_mouse_pos.y - self.drag_start_pos.y;
+                if dx.abs() < 5.0 && dy.abs() < 5.0 {
+                    // Only toggle if it was a tiny movement (a click, not a drag)
+                    self.show_reader_controls = !self.show_reader_controls;
+                }
+            }
+
+            Message::MouseMoved(position) => {
+                if self.is_dragging && self.view == AppView::Reader {
+                    let delta = position - self.last_mouse_pos;
+                    self.pan.x += delta.x;
+                    self.pan.y += delta.y;
+                }
+                self.last_mouse_pos = position;
+            }
+
             Message::KeyPressed(key) => {
                 if self.view == AppView::Reader {
                     match key {
@@ -728,6 +865,8 @@ impl ComicApp {
                             return self.update(Message::PrevPage);
                         }
                         keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                            self.zoom = 1.0;
+                            self.pan = iced::Vector::new(0.0, 0.0);
                             return self.update(Message::CloseReader);
                         }
                         _ => {}
@@ -739,11 +878,6 @@ impl ComicApp {
         Task::none()
     }
 
-    fn subscription(&self) -> Subscription<Message> {
-        keyboard::on_key_press(|key, _modifiers| {
-            Some(Message::KeyPressed(key))
-        })
-    }
 
     fn view(&self) -> Element<'_, Message> {
         match &self.view {
@@ -842,18 +976,25 @@ impl ComicApp {
                         ..Default::default()
                     });
 
-                let layout: Element<Message> = row![sidebar, main_area]
-                    .height(Length::Fill)
-                    .into();
+                let layout: Element<Message> = if self.is_sidebar_open {
+                    row![sidebar, main_area].height(Length::Fill).into()
+                } else {
+                    main_area.into()
+                };
+
+                let root = column![
+                    self.top_bar(),
+                    layout,
+                ];
 
                 // Overlay editor or QR if active
                 if let Some(form) = &self.editing_form {
-                    stack![layout, ui::metadata_editor::view(form)].into()
+                    stack![root, ui::metadata_editor::view(form)].into()
                 } else if self.show_qr {
                     let qr_overlay = self.qr_overlay();
-                    stack![layout, qr_overlay].into()
+                    stack![root, qr_overlay].into()
                 } else {
-                    layout
+                    root.into()
                 }
             }
 
@@ -870,6 +1011,10 @@ impl ComicApp {
                     self.total_pages,
                     title,
                     self.is_loading_page,
+                    self.zoom,
+                    self.pan,
+                    self.is_dragging,
+                    self.show_reader_controls,
                 )
             }
         }
@@ -932,6 +1077,49 @@ impl ComicApp {
         } else {
             Task::none()
         }
+    }
+
+    fn top_bar(&self) -> Element<'_, Message> {
+        let menu_icon = button(
+            text("≡")
+                .size(28)
+                .font(iced::Font::with_name("Segoe UI"))
+        )
+        .padding(10)
+        .on_press(Message::ToggleSidebar)
+        .style(|_theme: &Theme, _status| button::Style {
+            background: Some(iced::Background::Color(iced::Color::TRANSPARENT)),
+            text_color: iced::Color::WHITE,
+            ..Default::default()
+        });
+
+        let clock = text(&self.current_time)
+            .size(16)
+            .color(iced::Color::from_rgb(0.7, 0.7, 0.7));
+
+        let title = text("My Comics")
+            .size(20)
+            .font(iced::Font::with_name("Segoe UI Semibold"))
+            .color(iced::Color::WHITE);
+
+        container(
+            row![
+                clock,
+                iced::widget::Space::with_width(Length::Fill),
+                title,
+                iced::widget::Space::with_width(Length::Fill),
+                menu_icon,
+            ]
+            .padding([10, 20])
+            .align_y(iced::Alignment::Center)
+        )
+        .width(Length::Fill)
+        .height(60)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgb(0.12, 0.12, 0.14))),
+            ..Default::default()
+        })
+        .into()
     }
 
     fn qr_overlay(&self) -> Element<'_, Message> {

@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input, image, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, image, Space, mouse_area};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::db::Collection;
@@ -14,8 +14,6 @@ pub fn view<'a>(
     renaming_id: Option<i64>,
     rename_input: &'a str,
 ) -> Element<'a, Message> {
-    let logo_icon = include_bytes!("../../assets/wow-icon.png");
-    let logo_handle = image::Handle::from_bytes(logo_icon.as_slice());
     
     let conn_icon = include_bytes!("../../assets/reading-icon.png");
     let conn_handle = image::Handle::from_bytes(conn_icon.as_slice());
@@ -29,23 +27,6 @@ pub fn view<'a>(
     let layer_icon = include_bytes!("../../assets/layer-icon.png");
     let layer_handle = image::Handle::from_bytes(layer_icon.as_slice());
 
-    let title = container(
-        row![
-            image(logo_handle).width(30).height(30),
-            text("COMIC").size(24).font(iced::Font::with_name("Segoe UI Semibold")),
-        ]
-        .spacing(10)
-        .align_y(Alignment::Center),
-    )
-    .padding(15)
-    .width(Length::Fill)
-    .style(|_theme: &Theme| container::Style {
-        background: Some(iced::Background::Color(iced::Color::from_rgb(
-            0.91, 0.27, 0.37,
-        ))),
-        text_color: Some(iced::Color::WHITE),
-        ..Default::default()
-    });
 
     let mut list = column![].spacing(2).padding(5);
 
@@ -139,7 +120,7 @@ pub fn view<'a>(
             } else {
                 button::Style {
                     background: if is_hovered {
-                        Some(iced::Background::Color(iced::Color::from_rgb(0.2, 0.2, 0.2)))
+                        Some(iced::Background::Color(iced::Color::from_rgba(0.2, 0.2, 0.2, 0.4)))
                     } else {
                         Some(iced::Background::Color(iced::Color::TRANSPARENT))
                     },
@@ -152,6 +133,9 @@ pub fn view<'a>(
                 }
             }
         });
+
+        let btn = mouse_area(btn)
+            .on_right_press(Message::ToggleCollectionMenu(cid));
 
         let collection_row = row![btn]
             .align_y(Alignment::Center)
@@ -332,7 +316,6 @@ pub fn view<'a>(
 
     container(
         column![
-            title,
             scrollable(list).height(Length::Fill),
             Space::with_height(Length::Fill),
             bottom_section,
@@ -340,11 +323,11 @@ pub fn view<'a>(
         ]
         .height(Length::Fill),
     )
-    .width(220)
+    .width(200)
     .height(Length::Fill)
     .style(|_theme: &Theme| container::Style {
-        background: Some(iced::Background::Color(iced::Color::from_rgb(
-            0.22, 0.22, 0.25,
+        background: Some(iced::Background::Color(iced::Color::from_rgba(
+            0.15, 0.15, 0.18, 0.95,
         ))),
         ..Default::default()
     })
