@@ -6,6 +6,7 @@ use tracing::info;
 pub struct Collection {
     pub id: i64,
     pub name: String,
+    pub icon_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,11 +58,15 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS collections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                icon_data BLOB NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )"
         )
         .execute(&self.pool)
         .await?;
+
+        // Migration: Add icon_data if it doesn't exist
+        let _ = sqlx::query("ALTER TABLE collections ADD COLUMN icon_data BLOB").execute(&self.pool).await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS collection_paths (
@@ -100,7 +105,7 @@ impl Database {
     // === Collections ===
 
     pub async fn get_collections(&self) -> Result<Vec<Collection>, sqlx::Error> {
-        let rows = sqlx::query("SELECT id, name FROM collections ORDER BY name")
+        let rows = sqlx::query("SELECT id, name, icon_data FROM collections ORDER BY name")
             .fetch_all(&self.pool)
             .await?;
 
@@ -109,6 +114,7 @@ impl Database {
             .map(|row| Collection {
                 id: row.get("id"),
                 name: row.get("name"),
+                icon_data: row.get("icon_data"),
             })
             .collect())
     }
@@ -136,6 +142,29 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    pub async fn update_collection(&self, collection: &Collection) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE collections SET name = ?, icon_data = ? WHERE id = ?")
+            .bind(&collection.name)
+            .bind(&collection.icon_data)
+            .bind(collection.id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_collection_by_id(&self, id: i64) -> Result<Option<Collection>, sqlx::Error> {
+        let row = sqlx::query("SELECT id, name, icon_data FROM collections WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.map(|row| Collection {
+            id: row.get("id"),
+            name: row.get("name"),
+            icon_data: row.get("icon_data"),
+        }))
     }
 
     // === Collection Paths ===

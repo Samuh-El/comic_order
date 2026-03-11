@@ -102,6 +102,7 @@ struct ComicApp {
 
     // Metadata editor
     editing_form: Option<MetadataForm>,
+    collection_editor_form: Option<ui::collection_editor::CollectionForm>,
 
     // Server
     server_running: bool,
@@ -178,6 +179,16 @@ pub enum Message {
     MetadataSaved(Result<(), String>),
     CloseEditor,
 
+    // Collection Editor
+    EditCollection(i64),
+    CollectionEditorNameChanged(String),
+    SelectCollectionIcon,
+    CollectionIconSelected(Option<String>),
+    RemoveCollectionIcon,
+    SaveCollectionEditor,
+    CollectionEditorSaved(Result<(), String>),
+    CloseCollectionEditor,
+
     // Server
     ToggleServer,
     ServerStarted,
@@ -220,6 +231,7 @@ impl ComicApp {
             total_pages: 0,
             page_handle: None,
             editing_form: None,
+            collection_editor_form: None,
             server_running: false,
             server_url: None,
             server_token: None,
@@ -253,6 +265,18 @@ impl ComicApp {
         );
 
         (app, task)
+    }
+
+    fn load_collections(&self) -> Task<Message> {
+        if let Some(db) = &self.db {
+            let db = db.clone();
+            Task::perform(
+                async move { db.get_collections().await.unwrap_or_default() },
+                Message::CollectionsLoaded,
+            )
+        } else {
+            Task::none()
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -737,6 +761,65 @@ impl ComicApp {
                 self.editing_form = None;
             }
 
+            // Collection Editor
+            Message::EditCollection(id) => {
+                self.context_menu_collection = None;
+                if let Some(col) = self.collections.iter().find(|c| c.id == id) {
+                    self.collection_editor_form = Some(ui::collection_editor::CollectionForm::new(
+                        col.id,
+                        &col.name,
+                        col.icon_data.clone(),
+                    ));
+                }
+            }
+            Message::CollectionEditorNameChanged(name) => {
+                if let Some(form) = &mut self.collection_editor_form {
+                    form.name = name;
+                }
+            }
+            Message::SelectCollectionIcon => {
+                return Task::perform(pick_image(), Message::CollectionIconSelected);
+            }
+            Message::CollectionIconSelected(Some(path)) => {
+                if let Some(form) = &mut self.collection_editor_form {
+                    if let Ok(data) = std::fs::read(&path) {
+                        // Optional: Resize to 1:1 if needed, for now just load
+                        form.icon_data = Some(data);
+                    }
+                }
+            }
+            Message::CollectionIconSelected(None) => {}
+            Message::RemoveCollectionIcon => {
+                if let Some(form) = &mut self.collection_editor_form {
+                    form.icon_data = None;
+                }
+            }
+            Message::SaveCollectionEditor => {
+                if let (Some(form), Some(db)) = (&self.collection_editor_form, &self.db) {
+                    let col = Collection {
+                        id: form.id,
+                        name: form.name.clone(),
+                        icon_data: form.icon_data.clone(),
+                    };
+                    let db = db.clone();
+                    return Task::perform(
+                        async move {
+                            db.update_collection(&col).await.map_err(|e| e.to_string())
+                        },
+                        Message::CollectionEditorSaved,
+                    );
+                }
+            }
+            Message::CollectionEditorSaved(Ok(_)) => {
+                self.collection_editor_form = None;
+                return self.load_collections();
+            }
+            Message::CollectionEditorSaved(Err(e)) => {
+                self.error_message = Some(format!("Error al guardar colección: {}", e));
+            }
+            Message::CloseCollectionEditor => {
+                self.collection_editor_form = None;
+            }
             Message::ToggleServer => {
                 if self.server_running {
                     // Just show QR if already running
@@ -924,8 +1007,6 @@ impl ComicApp {
                     self.show_new_collection,
                     self.server_running,
                     self.context_menu_collection,
-                    self.renaming_collection,
-                    &self.rename_input,
                 );
 
                 let main_content = if let Some(err) = &self.error_message {
@@ -989,8 +1070,14 @@ impl ComicApp {
 
                 // Overlay editor or QR if active
                 if let Some(form) = &self.editing_form {
-                    stack![root, ui::metadata_editor::view(form)].into()
-                } else if self.show_qr {
+                    return ui::metadata_editor::view(form);
+                }
+
+                if let Some(form) = &self.collection_editor_form {
+                    return ui::collection_editor::view(form);
+                }
+                
+                if self.show_qr {
                     let qr_overlay = self.qr_overlay();
                     stack![root, qr_overlay].into()
                 } else {
@@ -1212,6 +1299,39 @@ async fn rfd_pick_folder() -> Option<String> {
                 $result = $dialog.ShowDialog()
                 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
                     Write-Output $dialog.SelectedPath
+                }
+                "#,
+            ])
+            .output()
+            .ok()?;
+
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            None
+        } else {
+            Some(path)
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Use native Windows file picker dialog for images
+async fn pick_image() -> Option<String> {
+    tokio::task::spawn_blocking(|| {
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                r#"
+                Add-Type -AssemblyName System.Windows.Forms
+                $dialog = New-Object System.Windows.Forms.OpenFileDialog
+                $dialog.Filter = 'Imágenes|*.jpg;*.jpeg;*.png;*.webp;*.bmp'
+                $dialog.Title = 'Selecciona una imagen para la colección'
+                $result = $dialog.ShowDialog()
+                if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+                    Write-Output $dialog.FileName
                 }
                 "#,
             ])

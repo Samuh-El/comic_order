@@ -29,6 +29,7 @@ pub fn create_router(state: ServerState) -> Router {
 
     let api_routes = Router::new()
         .route("/collections", get(list_collections))
+        .route("/collections/:id/icon", get(get_collection_icon))
         .route("/collections/:id/comics", get(list_comics))
         .route("/comics/:id/cover", get(get_cover))
         .route("/comics/:id/page/:page", get(get_comic_page))
@@ -332,8 +333,12 @@ const WEB_PAGE: &str = r#"<!DOCTYPE html>
                 let html = '<h2 class="section-title">Mis Colecciones</h2><div class="grid">';
                 for (const c of collections) {
                     const safeName = escapeHtml(c.name);
+                    const iconUrl = c.has_icon 
+                        ? `/api/collections/${c.id}/icon?t=${state.token}`
+                        : `/api/icons/layer-icon.png?t=${state.token}`;
+                    
                     html += `<div class="card collection-card" data-id="${c.id}" data-name="${safeName}">
-                        <img src="/api/icons/layer-icon.png?t=${state.token}" class="icon-img" style="width: 48px; height: 48px; margin-bottom: 0.5rem; filter: drop-shadow(0 4px 8px rgba(255, 62, 94, 0.3));">
+                        <img src="${iconUrl}" class="icon-img" style="width: 80px; height: 80px; margin-bottom: 0.5rem; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(255, 62, 94, 0.3)); border-radius: 8px;">
                         <h3>${safeName}</h3>
                     </div>`;
                 }
@@ -474,7 +479,11 @@ async fn list_collections(State(state): State<ServerState>) -> impl IntoResponse
             }
             let data: Vec<serde_json::Value> = collections
                 .iter()
-                .map(|c| serde_json::json!({ "id": c.id, "name": c.name }))
+                .map(|c| serde_json::json!({ 
+                    "id": c.id, 
+                    "name": c.name,
+                    "has_icon": c.icon_data.is_some()
+                }))
                 .collect();
             Json(data).into_response()
         }
@@ -608,5 +617,41 @@ async fn get_icon(
             .into_response()
     } else {
         StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+async fn get_collection_icon(
+    State(state): State<ServerState>,
+    Path(collection_id): Path<i64>,
+) -> impl IntoResponse {
+    info!("[HTTP] GET /api/collections/{}/icon", collection_id);
+    match state.db.get_collection_by_id(collection_id).await {
+        Ok(Some(col)) => {
+            if let Some(data) = col.icon_data {
+                info!("[HTTP] Enviando icono de coleccion {} ({} bytes)", collection_id, data.len());
+                let content_type = if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                    "image/png"
+                } else if data.starts_with(&[0xFF, 0xD8]) {
+                    "image/jpeg"
+                } else {
+                    "image/jpeg"
+                };
+
+                Response::builder()
+                    .header("Content-Type", content_type)
+                    .header("Cache-Control", "public, max-age=3600")
+                    .body(axum::body::Body::from(data))
+                    .unwrap()
+                    .into_response()
+            } else {
+                info!("[HTTP] Coleccion {} no tiene icono personalizado", collection_id);
+                StatusCode::NOT_FOUND.into_response()
+            }
+        }
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            error!("[HTTP] Error obteniendo icono de coleccion {}: {}", collection_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }

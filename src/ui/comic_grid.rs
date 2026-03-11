@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, image, row, scrollable, text, Space, stack, canvas};
+use iced::widget::{button, column, container, image, row, scrollable, text, Space, stack, canvas, svg};
 use iced::{Alignment, Element, Length, Theme, Color, Point, Renderer};
 use iced::widget::canvas::{Program, Geometry, Frame};
 
@@ -24,8 +24,16 @@ pub fn view<'a>(
             .spacing(4),
             Space::with_width(Length::Fill),
             button(
-                row![text("📂").size(14), text("Añadir Carpeta").size(13)]
-                    .spacing(6)
+                row![
+                    svg(svg::Handle::from_memory(include_bytes!("../../assets/add-folder-svgrepo-com.svg").as_slice()))
+                        .width(18)
+                        .height(18)
+                        .style(|_theme: &Theme, _status| svg::Style {
+                            color: Some(iced::Color::WHITE),
+                        }),
+                    text("Añadir Carpeta").size(13)
+                ]
+                    .spacing(8)
                     .align_y(Alignment::Center),
             )
             .padding([8, 14])
