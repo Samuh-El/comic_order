@@ -6,9 +6,9 @@ mod ui;
 
 use std::collections::HashMap;
 
-use iced::widget::{button, column, container, image, row, stack, text};
+use iced::widget::{button, column, container, image, row, stack, text, svg, Space};
 use iced::keyboard;
-use iced::{Element, Font, Length, Subscription, Task, Theme};
+use iced::{Alignment, Element, Font, Length, Subscription, Task, Theme};
 use tracing::{info, warn, error, debug};
 
 use db::{Collection, Comic, Database};
@@ -128,6 +128,11 @@ struct ComicApp {
     last_mouse_pos: iced::Point,
     drag_start_pos: iced::Point,
     show_reader_controls: bool,
+
+    // Trusted Devices
+    trusted_devices_form: Option<ui::trusted_devices::TrustedDevicesForm>,
+    trusted_qr_handle: Option<iced::widget::image::Handle>,
+    trusted_qr_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -195,6 +200,15 @@ pub enum Message {
     StopServer,
     CloseQR,
 
+    // Trusted Devices
+    ManageTrustedDevices,
+    TrustedDevicesLoaded(Vec<db::TrustedDevice>),
+    AddTrustedDevice,
+    TrustedQRGenerated(String, iced::widget::image::Handle),
+    DeleteTrustedDevice(i64),
+    TrustedDeviceDeleted(Result<(), String>),
+    CloseTrustedDevices,
+
     // Scanning
     ScanComplete(Result<Vec<Comic>, String>),
 
@@ -253,6 +267,9 @@ impl ComicApp {
             last_mouse_pos: iced::Point::ORIGIN,
             drag_start_pos: iced::Point::ORIGIN,
             show_reader_controls: true,
+            trusted_devices_form: None,
+            trusted_qr_handle: None,
+            trusted_qr_url: None,
         };
 
         let task = Task::perform(
@@ -956,6 +973,87 @@ impl ComicApp {
                     }
                 }
             }
+
+            Message::ManageTrustedDevices => {
+                if let Some(db) = &self.db {
+                    let db = db.clone();
+                    return Task::perform(
+                        async move { db.get_trusted_devices().await.unwrap_or_default() },
+                        Message::TrustedDevicesLoaded,
+                    );
+                }
+            }
+            Message::TrustedDevicesLoaded(devices) => {
+                self.trusted_devices_form = Some(ui::trusted_devices::TrustedDevicesForm::new(devices));
+            }
+            Message::AddTrustedDevice => {
+                if let Some(db) = &self.db {
+                    let db = db.clone();
+                    let server_url = self.server_url.clone();
+                    info!("[UI] Iniciando registro de dispositivo recurrente");
+                    return Task::perform(
+                        async move {
+                            if let Some(name) = prompt_name().await {
+                                info!("[UI] Nombre recibido: {}", name);
+                                let token = uuid::Uuid::new_v4().to_string().replace("-", "")[..16].to_string();
+                                if db.add_trusted_device(&token, &name).await.is_ok() {
+                                    let url = if let Some(existing_url) = server_url {
+                                        let base = existing_url.split('?').next().unwrap_or(&existing_url);
+                                        format!("{}?token={}", base, token)
+                                    } else {
+                                        crate::qr::get_server_url(8080, Some(&token))
+                                    };
+
+                                    info!("[UI] Generando QR para: {}", url);
+                                    if let Some(handle) = generate_qr(&url) {
+                                        return Some((url, handle));
+                                    } else {
+                                        error!("[UI] Error generando handle de imagen QR");
+                                    }
+                                } else {
+                                    error!("[UI] Error guardando dispositivo en DB");
+                                }
+                            } else {
+                                info!("[UI] Dialogo de nombre cancelado o vacio");
+                            }
+                            None
+                        },
+                        |res| {
+                            if let Some((url, handle)) = res {
+                                Message::TrustedQRGenerated(url, handle)
+                            } else {
+                                Message::ManageTrustedDevices
+                            }
+                        }
+                    );
+                }
+            }
+            Message::TrustedQRGenerated(url, handle) => {
+                info!("[UI] QR de dispositivo recurrente generado y listo para mostrar");
+                self.trusted_qr_url = Some(url);
+                self.trusted_qr_handle = Some(handle);
+                return self.update(Message::ManageTrustedDevices);
+            }
+            Message::DeleteTrustedDevice(id) => {
+                if let Some(db) = &self.db {
+                    let db = db.clone();
+                    return Task::perform(
+                        async move { db.delete_trusted_device(id).await.map_err(|e| e.to_string()) },
+                        Message::TrustedDeviceDeleted,
+                    );
+                }
+            }
+            Message::TrustedDeviceDeleted(Ok(_)) => {
+                return self.update(Message::ManageTrustedDevices);
+            }
+            Message::TrustedDeviceDeleted(Err(e)) => {
+                self.error_message = Some(format!("Error eliminando dispositivo: {}", e));
+            }
+            Message::CloseTrustedDevices => {
+                self.trusted_devices_form = None;
+                self.trusted_qr_handle = None;
+                self.trusted_qr_url = None;
+            }
         }
 
         Task::none()
@@ -1080,6 +1178,9 @@ impl ComicApp {
                 if self.show_qr {
                     let qr_overlay = self.qr_overlay();
                     stack![root, qr_overlay].into()
+                } else if let Some(form) = &self.trusted_devices_form {
+                    let td_overlay = ui::trusted_devices::view(form, self.trusted_qr_handle.as_ref(), self.trusted_qr_url.as_deref());
+                    stack![root, td_overlay].into()
                 } else {
                     root.into()
                 }
@@ -1213,7 +1314,24 @@ impl ComicApp {
         let url_text = self.server_url.as_deref().unwrap_or("...");
 
         let mut content = column![
-            text("Compartir Coleccion").size(22),
+            row![
+                text("Compartir Coleccion").size(22),
+                Space::with_width(Length::Fill),
+                button(
+                    svg(svg::Handle::from_memory(include_bytes!("../assets/close-circle-svgrepo-com.svg").as_slice()))
+                        .width(20)
+                        .height(20)
+                        .style(|_theme: &Theme, _status| svg::Style {
+                            color: Some(iced::Color::from_rgb(0.7, 0.7, 0.7)),
+                        })
+                )
+                .on_press(Message::CloseQR)
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(iced::Background::Color(iced::Color::TRANSPARENT)),
+                    ..Default::default()
+                }),
+            ]
+            .align_y(Alignment::Center),
             text("Escanea el codigo QR desde tu dispositivo").size(14),
         ]
         .spacing(10)
@@ -1343,6 +1461,44 @@ async fn pick_image() -> Option<String> {
             None
         } else {
             Some(path)
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+/// Generate a QR code as an iced image Handle
+fn generate_qr(url: &str) -> Option<iced::widget::image::Handle> {
+    if let Some((rgba, w, h)) = crate::qr::generate_qr_image(url, 256) {
+        Some(iced::widget::image::Handle::from_rgba(w, h, rgba))
+    } else {
+        None
+    }
+}
+
+/// Use native Windows dialog to prompt for a string
+async fn prompt_name() -> Option<String> {
+    tokio::task::spawn_blocking(|| {
+        let output = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                r#"
+                Add-Type -AssemblyName Microsoft.VisualBasic
+                $name = [Microsoft.VisualBasic.Interaction]::InputBox('Ingresa un nombre para el nuevo dispositivo:', 'Añadir Dispositivo Recurrente', '')
+                if ($name) {
+                    Write-Output $name
+                }
+                "#,
+            ])
+            .output()
+            .ok()?;
+
+        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if name.is_empty() {
+            None
+        } else {
+            Some(name)
         }
     })
     .await

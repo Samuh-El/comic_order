@@ -30,6 +30,14 @@ pub struct Comic {
     pub page_count: i32,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TrustedDevice {
+    pub id: i64,
+    pub token: String,
+    pub device_name: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Database {
     pool: SqlitePool,
@@ -295,5 +303,49 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    // === Trusted Devices ===
+
+    pub async fn get_trusted_devices(&self) -> Result<Vec<TrustedDevice>, sqlx::Error> {
+        let rows = sqlx::query("SELECT id, token, device_name, created_at FROM trusted_devices ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .iter()
+            .map(|row| TrustedDevice {
+                id: row.get("id"),
+                token: row.get("token"),
+                device_name: row.get("device_name"),
+                created_at: row.get("created_at"),
+            })
+            .collect())
+    }
+
+    pub async fn add_trusted_device(&self, token: &str, device_name: &str) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO trusted_devices (token, device_name) VALUES (?, ?)")
+            .bind(token)
+            .bind(device_name)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.last_insert_rowid() as i64)
+    }
+
+    pub async fn delete_trusted_device(&self, id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM trusted_devices WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn is_token_trusted(&self, token: &str) -> Result<bool, sqlx::Error> {
+        let row = sqlx::query("SELECT COUNT(*) as cnt FROM trusted_devices WHERE token = ?")
+            .bind(token)
+            .fetch_one(&self.pool)
+            .await?;
+        let count: i64 = row.get("cnt");
+        Ok(count > 0)
     }
 }

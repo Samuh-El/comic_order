@@ -273,6 +273,37 @@ pub fn view<'a>(
         share_section = share_section.push(stop_btn);
     }
 
+    // Manage Trusted Devices Button
+    let manage_devices_btn = button(
+        row![
+            svg(svg::Handle::from_memory(include_bytes!("../../assets/devices-svgrepo-com.svg").as_slice()))
+                .width(18)
+                .height(18)
+                .style(|_theme: &Theme, _status| svg::Style {
+                    color: Some(iced::Color::from_rgb(0.7, 0.7, 0.8)),
+                }),
+            text("Dispositivos Recurrentes").size(13)
+        ]
+        .spacing(10)
+        .width(Length::Fill)
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding(12)
+    .on_press(Message::ManageTrustedDevices)
+    .style(|_theme: &Theme, _status| button::Style {
+        background: Some(iced::Background::Color(iced::Color::from_rgb(0.12, 0.12, 0.20))),
+        text_color: iced::Color::from_rgb(0.7, 0.7, 0.8),
+        border: iced::Border {
+            color: iced::Color::from_rgb(0.3, 0.3, 0.4),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..Default::default()
+    });
+
+    share_section = share_section.push(manage_devices_btn);
+
     container(
         column![
             scrollable(list).height(Length::Fill),

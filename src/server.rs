@@ -69,28 +69,49 @@ async fn auth_middleware(
     
     info!("[CONN] Requerido: {} {}. Header Auth: {:?}", method, uri, auth_header.is_some());
 
+    let mut token_to_check = None;
+
     if let Some(header_val) = auth_header.and_then(|h| h.to_str().ok()) {
         if let Some(token) = header_val.strip_prefix("Bearer ") {
-            if token == state.token {
-                info!("[AUTH] OK: Token Bearer validado para {}", uri);
-                return Ok(next.run(req).await);
-            }
-            error!("[AUTH] FAIL: Token Bearer no coincide. Recibido: '{}', Esperado: '{}'", token, state.token);
-        } else {
-            error!("[AUTH] FAIL: Header Authorization mal formado. Debe ser 'Bearer <token>'");
+            token_to_check = Some(token.to_string());
         }
     }
 
     // 2. Check query parameter 't'
-    if let Some(query) = req.uri().query() {
-        let params: Vec<&str> = query.split('&').collect();
-        for param in params {
-            if let Some(val) = param.strip_prefix("t=") {
-                if val == state.token {
-                    info!("[AUTH] OK: Token Query validado para {}", uri);
-                    return Ok(next.run(req).await);
+    if token_to_check.is_none() {
+        if let Some(query) = req.uri().query() {
+            let params: Vec<&str> = query.split('&').collect();
+            for param in params {
+                if let Some(val) = param.strip_prefix("token=") {
+                    token_to_check = Some(val.to_string());
+                    break;
                 }
-                error!("[AUTH] FAIL: Token Query no coincide en {}: '{}' != '{}'", uri, val, state.token);
+                if let Some(val) = param.strip_prefix("t=") {
+                    token_to_check = Some(val.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(token) = token_to_check {
+        // Validate against session token
+        if token == state.token {
+            info!("[AUTH] OK: Token de sesion validado para {}", uri);
+            return Ok(next.run(req).await);
+        }
+
+        // Validate against database (trusted devices)
+        match state.db.is_token_trusted(&token).await {
+            Ok(true) => {
+                info!("[AUTH] OK: Token RECURRENTE validado para {}", uri);
+                return Ok(next.run(req).await);
+            }
+            Ok(false) => {
+                error!("[AUTH] FAIL: Token no reconocido en session ni trusted DB: {}", token);
+            }
+            Err(e) => {
+                error!("[AUTH] ERROR consultando trusted devices: {}", e);
             }
         }
     }
@@ -258,10 +279,10 @@ const WEB_PAGE: &str = r#"<!DOCTYPE html>
         function init() {
             const urlParams = new URLSearchParams(window.location.search);
             const urlToken = urlParams.get('token');
+            
             if (urlToken) {
                 state.token = urlToken;
                 localStorage.setItem('comic_token', urlToken);
-                window.history.replaceState({}, document.title, "/");
             } else {
                 state.token = localStorage.getItem('comic_token');
             }
@@ -274,7 +295,13 @@ const WEB_PAGE: &str = r#"<!DOCTYPE html>
                     </div>`;
                 return;
             }
+
+            // Automatic prompt removed in refactored flow
             loadCollections();
+        }
+
+        async function saveAsRecurring() {
+            // Deprecated: Recurring devices are now added from the desktop app via specific QR
         }
 
         async function apiFetch(url) {
@@ -334,8 +361,8 @@ const WEB_PAGE: &str = r#"<!DOCTYPE html>
                 for (const c of collections) {
                     const safeName = escapeHtml(c.name);
                     const iconUrl = c.has_icon 
-                        ? `/api/collections/${c.id}/icon?t=${state.token}`
-                        : `/api/icons/layer-icon.png?t=${state.token}`;
+                        ? `/api/collections/${c.id}/icon?token=${state.token}`
+                        : `/api/icons/layer-icon.png?token=${state.token}`;
                     
                     html += `<div class="card collection-card" data-id="${c.id}" data-name="${safeName}">
                         <img src="${iconUrl}" class="icon-img" style="width: 80px; height: 80px; margin-bottom: 0.5rem; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(255, 62, 94, 0.3)); border-radius: 8px;">
@@ -655,3 +682,5 @@ async fn get_collection_icon(
         }
     }
 }
+
+// trust_device endpoint removed in refactored flow

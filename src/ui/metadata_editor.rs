@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{button, column, container, row, text, text_input, Space, svg};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::Message;
@@ -32,14 +32,20 @@ pub fn view<'a>(form: &'a MetadataForm) -> Element<'a, Message> {
                 row![
                     text("Editar Comic").size(20).color(iced::Color::WHITE),
                     Space::with_width(Length::Fill),
-                    button(text("✕").size(16))
-                        .padding(4)
-                        .on_press(Message::CloseEditor)
-                        .style(|_theme: &Theme, _status| button::Style {
-                            background: Some(iced::Background::Color(iced::Color::TRANSPARENT)),
-                            text_color: iced::Color::from_rgb(0.6, 0.6, 0.6),
-                            ..Default::default()
-                        }),
+                    button(
+                        svg(svg::Handle::from_memory(include_bytes!("../../assets/close-circle-svgrepo-com.svg").as_slice()))
+                            .width(18)
+                            .height(18)
+                            .style(|_theme: &Theme, _status| svg::Style {
+                                color: Some(iced::Color::from_rgb(0.6, 0.6, 0.6)),
+                            })
+                    )
+                    .padding(4)
+                    .on_press(Message::CloseEditor)
+                    .style(|_theme: &Theme, _status| button::Style {
+                        background: Some(iced::Background::Color(iced::Color::TRANSPARENT)),
+                        ..Default::default()
+                    }),
                 ]
                 .align_y(Alignment::Center),
                 
