@@ -1,97 +1,104 @@
-# Instrucciones Canónicas de Backend
+# Instrucciones Canónicas de Backend (Monolito Modular y Arquitectura Hexagonal)
 
-Este documento establece las directrices arquitectónicas, estándares de codificación y reglas obligatorias para todo el desarrollo del backend, el motor de lectura de cómics y el servidor HTTP en **Rust**.
-
----
-
-## 1. Stack y Runtime del Backend
-
-- **Lenguaje**: Rust (Edition 2021).
-- **Runtime Asíncrono**: `tokio` (v1.x, feature `full`).
-- **Servidor HTTP**: `axum` (v0.7) con extensiones de `tower` y `tower-http` (v0.5).
-- **Formatos de Cómic**: `zip` (v2.2) para archivos `.cbz`/`.zip`, `unrar` (v0.5) para archivos `.cbr`/`.rar`.
-- **Procesamiento Gráfico**: `image` (v0.25).
-- **Generación de QR y Red**: `qrcode` (v0.14) y `local-ip-address` (v0.6).
-- **Logging**: `tracing`, `tracing-subscriber`, `tracing-appender`.
+Este documento establece las directrices arquitectónicas, estándares de codificación y reglas obligatorias para todo el desarrollo del backend, el motor de lectura de cómics y los servicios de red en **Rust** para el proyecto **Comic**.
 
 ---
 
-## 2. Organización Modular del Backend
+## 1. Estilo Arquitectónico: Monolito Modular Hexagonal
 
-El código del backend reside en los siguientes módulos bajo `app/src/`:
+El backend se estructura siguiendo los principios de la **Arquitectura Hexagonal (Puertos y Adaptadores / Clean Architecture)** dentro de un **Monolito Modular**:
+
+1. **Aislamiento del Dominio**:
+   - El núcleo del dominio (`app/src/domain/`) contiene entidades puras, objetos de valor y contratos de puertos. Queda estrictamente prohibido importar librerías de infraestructura, frameworks web (Axum) o GUI (Iced) dentro del dominio.
+2. **Puertos de Entrada (Inbound / Primary Ports)**:
+   - Definen las interfaces que los actores externos (clientes web, lectores OPDS, GUI) usan para interactuar con la aplicación.
+3. **Puertos de Salida (Outbound / Secondary Ports)**:
+   - Definen las abstracciones requeridas por el sistema para interactuar con recursos externos: sistema de archivos (`ComicFileReader`), almacenamiento relacional (`ComicRepository`), y caché de medios (`ImageCache`).
+
+---
+
+## 2. Organización de Módulos en `app/src/`
 
 ```
 app/src/
-├── comic_reader.rs   # Motor de detección, descompresión en memoria y miniaturas
-├── db.rs             # Capa de persistencia asíncrona y repositorio SQLite
-├── qr.rs             # Resolución de red local y generación de matrices QR
-├── server.rs         # Servidor HTTP Axum, middlewares, API REST y SPA web
-└── main.rs           # Orquestador del ciclo de vida y despacho de tareas Tokio
+├── domain/                  # Entidades puras y puertos (traits)
+│   ├── mod.rs
+│   ├── comic.rs             # Entidad Comic y metadatos
+│   ├── collection.rs        # Entidad Collection y rutas asociadas
+│   ├── progress.rs          # Progreso de lectura por usuario/dispositivo
+│   └── ports.rs             # Traits para lectores de cómic, persistencia y caché
+├── application/             # Casos de uso y Fachada
+│   ├── mod.rs
+│   ├── facade.rs            # ComicFacade (punto unificado de operaciones compuestas)
+│   └── services/            # Servicios de orquestación de lectura, catalogación y búsqueda
+├── adapters/                # Adaptadores de entrada y salida
+│   ├── mod.rs
+│   ├── inbound/
+│   │   ├── rest_api/        # Endpoints Axum REST, middlewares y autenticación
+│   │   ├── opds/            # Feed estándar Atom/OPDS para clientes móviles
+│   │   └── websocket/       # Sincronización de progreso en tiempo real
+│   └── outbound/
+│       ├── persistence/     # Implementación SQLite con SQLx
+│       ├── file_readers/    # Adaptadores específicos: CBZ (zip), CBR (unrar)
+│       └── cache/           # Proxy de caché de imágenes y páginas en memoria/disco
+├── ingestion/               # File Watcher reactivo y procesamiento en segundo plano
+│   ├── mod.rs
+│   ├── watcher.rs           # Observador de eventos del sistema de archivos
+│   ├── worker.rs            # Trabajador asíncrono de ingesta
+│   └── metadata_parser.rs   # Extracción de ComicInfo.xml
+└── network/                 # Utilidades de red local
+    ├── mod.rs
+    ├── mdns.rs              # Anuncio y descubrimiento de servicios en LAN
+    └── qr.rs                # Generación de códigos QR y detección de IP
 ```
 
 ---
 
-## 3. Motor de Lectura de Cómics (`comic_reader.rs`)
+## 3. Patrones de Diseño Obligatorios
 
-### Reglas de Procesamiento de Archivos:
-1. **Extracción Exclusiva en Memoria RAM**:
-   - Queda estrictamente prohibido descomprimir cómics completos al disco duro. Toda lectura de páginas debe realizarse en streams o buffers de memoria RAM.
-2. **Filtrado de Archivos no Deseados**:
-   - Al listar el contenido de archivos comprimidos, DEBEN descartarse directorios, metadatos del sistema operativo (carpetas que comiencen con `__MACOSX`, archivos que inicien con `.`) y ficheros que no tengan extensiones de imagen válidas (`.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.bmp`).
-3. **Ordenamiento Alfabético Canónico**:
-   - Las páginas dentro de un cómic deben ordenarse alfabéticamente de forma natural para garantizar la secuencia de lectura correcta.
-4. **Generación de Miniaturas (*Thumbnails*)**:
-   - La portada (página de índice 0) debe extraerse y redimensionarse a una resolución máxima de 300x450 píxeles con formato JPEG para su almacenamiento como BLOB en la base de datos, optimizando el consumo de memoria y la velocidad de carga.
-5. **Aislamiento de Operaciones Bloqueantes**:
-   - La descompresión de archivos grandes (especialmente a través de la biblioteca nativa `unrar`) o el escaneo recursivo mediante `walkdir` DEBEN ejecutarse dentro de `tokio::task::spawn_blocking` para no bloquear el runtime asíncrono de Tokio.
+### A. Patrón Adaptador (*Adapter Pattern*)
+- Todos los formatos de archivo de cómic deben implementar el trait canónico `ComicFileReader`:
+  ```rust
+  pub trait ComicFileReader: Send + Sync {
+      fn can_handle(&self, extension: &str) -> bool;
+      fn get_page_count(&self, file_path: &str) -> Result<usize, ComicError>;
+      fn extract_cover(&self, file_path: &str) -> Result<Vec<u8>, ComicError>;
+      fn extract_page(&self, file_path: &str, page_index: usize) -> Result<Vec<u8>, ComicError>;
+  }
+  ```
+- Se implementan adaptadores específicos para:
+  - `CbzFileReader` (basado en `zip`).
+  - `CbrFileReader` (basado en `unrar`).
+  - Futuros adaptadores (`PdfFileReader`, `EpubFileReader`).
 
----
+### B. Patrón Fachada (*Facade Pattern*)
+- `ComicFacade` proporciona un API simple y de alto nivel a las capas de presentación:
+  - `get_comic_page(id, page, max_width, max_height)`: orquesta la consulta de metadatos, la comprobación en el proxy de caché, la descompresión a través del adaptador y el escalado opcional.
 
-## 4. Servidor Web y API REST (`server.rs`)
+### C. Patrón Observador (*Observer Pattern*)
+- El módulo de ingesta escucha eventos del sistema de archivos (`create`, `modify`, `delete`) y notifica al servicio de catálogo para actualizar el índice en SQLite automáticamente sin intervención manual.
 
-### Arquitectura de Rutas y Seguridad:
-1. **Rutas Públicas**:
-   - `GET /`: Sirve la SPA HTML/CSS/JS autocontenida (`WEB_PAGE`).
-   - `GET /ping`: Responde `"pong"` para comprobación de estado de servicio.
-2. **Rutas Protegidas (`/api/...`)**:
-   - Todas las rutas de la API deben estar agrupadas bajo el router `/api` y protegidas obligatoriamente por el middleware de autenticación `auth_middleware`.
-   - Endpoints estándar:
-     - `GET /api/collections` -> Lista de colecciones en JSON.
-     - `GET /api/collections/:id/icon` -> Icono binario con cabecera `Cache-Control`.
-     - `GET /api/collections/:id/comics` -> Lista de cómics en JSON.
-     - `GET /api/comics/:id/cover` -> Portada JPEG en miniatura con cabecera `Cache-Control`.
-     - `GET /api/comics/:id/page/:page` -> Extracción y servicio en tiempo real de la página solicitada.
-     - `GET /api/icons/:name` -> Iconos estáticos del sistema empaquetados.
-3. **Middleware de Autenticación (`auth_middleware`)**:
-   - Debe aceptar el token mediante:
-     1. Cabecera `Authorization: Bearer <token>`.
-     2. Parámetro en la URL `?token=<token>` o `?t=<token>`.
-   - Un token es válido si coincide con el token de sesión actual en memoria (`state.token`) O si existe y está activo en la tabla `trusted_devices` de la base de datos.
-   - En caso de token ausente o inválido, DEBE retornar inmediatamente `401 Unauthorized`.
-4. **Middlewares Obligatorios**:
-   - **CORS**: Permitir orígenes, métodos y cabeceras necesarios para clientes locales.
-   - **Límite de Carga**: `RequestBodyLimitLayer` configurado a 10 MB.
-   - **Cabeceras de Seguridad**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, y CSP estricto.
-5. **Detección de Tipos MIME en Páginas**:
-   - Al servir páginas binarias de cómics, la respuesta debe detectar el tipo de contenido inspeccionando los números mágicos del buffer:
-     - JPEG: prefijo `[0xFF, 0xD8]` -> `image/jpeg`.
-     - PNG: prefijo `[0x89, 0x50, 0x4E, 0x47]` -> `image/png`.
-     - Por defecto: `image/jpeg`.
+### D. Patrón Estrategia (*Strategy Pattern*)
+- Soporte para políticas intercambiables de compresión de imágenes y modos de visualización (página simple, doble página o lectura vertical continua tipo Webtoon) en función del cliente solicitante.
+
+### E. Patrón Proxy de Caché (*Cache Proxy*)
+- Intercepta las solicitudes hacia los adaptadores de archivos: si la miniatura o página redimensionada ya se encuentra en la caché, se entrega en < 10 ms sin tocar los ficheros comprimidos.
 
 ---
 
-## 5. Estándares de Codificación en Rust
+## 4. Características de Red Local (LAN) y Escalabilidad
 
-1. **Manejo Idiomático de Errores**:
-   - PROHIBIDO el uso de `.unwrap()` o `.expect()` en código de producción del backend.
-   - Todo posible error (lectura de disco, descompresión, conexión a base de datos, parsing numérico) debe manejarse mediante `Result<T, E>`, el operador `?`, o funciones de combinación (`map_err`, `and_then`).
-2. **Logging y Trazas**:
-   - Utilizar exclusivamente las macros del ecosistema `tracing`:
-     - `error!`: Fallos críticos de conexión a BD, lectura de archivos corruptos o rechazos de autenticación.
-     - `warn!`: Condiciones inesperadas no fatales (ej. archivos sin extensión ignorados en el escaneo).
-     - `info!`: Eventos de ciclo de vida (inicio de servidor, peticiones HTTP recibidas, cómics agregados).
-     - `debug!`: Detalles granulares de depuración (rutas internas, análisis de cabeceras).
-3. **Manejo de Ciclo de Vida y Apagado Seguro (*Graceful Shutdown*)**:
-   - El servidor Axum debe vincularse a un canal `tokio::sync::oneshot` para poder cerrarse limpiamente sin dejar puertos bloqueados cuando el usuario detiene el servicio en la GUI de escritorio.
-4. **Idioma**:
-   - Todos los comentarios de código, docstrings y mensajes de log DEBEN estar redactados exclusivamente en español.
+1. **Streaming Bajo Demanda**:
+   - Se prohíbe enviar cómics enteros al cliente. Las páginas se sirven individualmente en respuesta a peticiones HTTP puntuales.
+2. **Descubrimiento mDNS / Zeroconf**:
+   - El servidor se anuncia en la red local bajo el tipo de servicio `_comic._tcp.local` para que clientes móviles puedan autodescubrirlo sin escribir IPs manualmente.
+3. **Control de Concurrencia**:
+   - Toda operación de I/O de archivos pesados o descompresión DEBE aislarse en `tokio::task::spawn_blocking` para mantener libre el pool de trabajadores asíncronos de Tokio.
+
+---
+
+## 5. Estándares de Calidad y Convenciones de Código
+
+- **Tolerancia Cero a Pánicos**: Prohibido el uso de `.unwrap()` y `.expect()` en rutas ejecutadas en runtime.
+- **Trazas y Logs**: Uso exclusivo de `tracing` canalizado hacia `app/log/comic.YYYY-MM-DD.log`.
+- **Idioma**: 100% en español (código, nombres descriptivos, comentarios y docstrings).

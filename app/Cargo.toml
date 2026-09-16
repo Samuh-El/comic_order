@@ -35,3 +35,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
 unrar = "0.5"
+notify = "6"
+async-trait = "0.1"
+thiserror = "1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

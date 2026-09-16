@@ -1,19 +1,19 @@
-# Instrucciones Canónicas de Frontend
+# Instrucciones Canónicas de Frontend (Adaptadores de Entrada)
 
 Este documento define la arquitectura visual, tokens de diseño, estándares de componentes y directrices de implementación para las interfaces de usuario del proyecto **Comic**: la aplicación de escritorio nativa (**Iced GUI**) y el lector web remoto (**SPA Embebida**).
 
 ---
 
-## 1. Arquitectura de Frontend
+## 1. Rol en la Arquitectura Hexagonal
 
-El proyecto posee dos canales de presentación visual unificados bajo una misma identidad gráfica:
+Tanto la interfaz gráfica de escritorio como el lector web remoto operan como **Adaptadores de Entrada Primarios (*Primary / Inbound Adapters*)**:
 
-1. **Frontend Nativo de Escritorio (Iced v0.13)**:
-   - Basado en **The Elm Architecture (TEA)**: Modelo central (`ComicApp`), Actualización pura (`update`), Renderizado funcional declarativo (`view`) y Suscripciones asíncronas (`subscription`).
-   - Ubicación de componentes: `app/src/ui/`.
-2. **Lector Web Remoto (SPA Embebida en `app/src/server.rs`)**:
-   - Desarrollado en **HTML5 / CSS3 / JavaScript Vanilla (ES6+)** autocontenido en una constante de cadena en el servidor.
-   - Diseñado para visualización *mobile-first* en teléfonos y tabletas conectadas por red local, sin dependencias externas ni CDNs.
+1. **GUI Nativa de Escritorio (Iced v0.13)**:
+   - Se ubica en `app/src/adapters/inbound/desktop_ui/` (o modularizado en `app/src/ui/`).
+   - Implementa **The Elm Architecture (TEA)** y consume directamente la Fachada de Aplicación (`ComicFacade`) para cargar colecciones y páginas sin interactuar con I/O directo de disco.
+2. **Lector Web Remoto (SPA Embebida)**:
+   - Se sirve desde el adaptador de API REST (`app/src/adapters/inbound/rest_api/`) y consume los endpoints HTTP del servidor Axum.
+   - 100% autocontenida en HTML5 / CSS3 / JavaScript Vanilla (ES6+), diseñada para visualización *mobile-first* en teléfonos y tabletas conectadas por red local, sin dependencias externas ni CDNs.
 
 ---
 
@@ -36,69 +36,43 @@ Ambas interfaces DEBEN mantener coherencia estricta respetando la siguiente pale
 | **`--overlay-bg`** | `#000000b3`| `rgba(0.0, 0.0, 0.0, 0.70)` | Fondo oscurecido de modales y visor a pantalla completa. |
 
 ### Tipografía:
-- **Familia tipográfica**: Segoe UI, -apple-system, BlinkMacSystemFont, 'Inter', Roboto, sans-serif.
-- **Variantes de peso**: Regular (texto corriente), Semibold (títulos de sección), Bold (encabezados de modales).
+- **Familia**: Segoe UI, -apple-system, BlinkMacSystemFont, 'Inter', Roboto, sans-serif.
+- **Pesos**: Regular (400), Semibold (600), Bold (700).
 
 ### Radios de Borde (Border Radius):
-- Pequeño: `4.0px` - `6.0px` (botones secundarios, menús contextuales).
-- Estándar: `8.0px` - `10.0px` (tarjetas de cómic, botones principales, campos de texto).
-- Amplio: `12.0px` - `16.0px` (contenedores modales flotantes).
+- Pequeño: `4.0px` - `6.0px`
+- Estándar: `8.0px` - `10.0px`
+- Amplio: `12.0px` - `16.0px`
 
 ---
 
-## 3. Guía de Componentes de Escritorio (Iced)
+## 3. Modos de Lectura (Patrón Estrategia en UI)
 
-### A. Barra Lateral (`app/src/ui/sidebar.rs`)
-- Contenedor con ancho fijo (`200px`) y scroll vertical independiente.
-- Lista de colecciones con iconos representativos.
-- Menú contextual desplegable mediante clic derecho (`mouse_area(btn).on_right_press(...)`) con opciones para **Editar** (nombre e icono) y **Eliminar**.
-- Botón dinámico de **Servidor Activo / Compartir QR** con cambio de color semántico (rojo cuando está inactivo, verde cuando está activo).
-- Botón de **Dispositivos Recurrentes** para acceder a la gestión de accesos permanentes.
-
-### B. Cuadrícula de Cómics (`app/src/ui/comic_grid.rs`)
-- Renderizado de fondo mediante Canvas personalizado (`MeshGradient`) con gradientes lineales superpuestos para un aspecto moderno y elegante.
-- Barra superior con nombre de la colección, total de cómics y botón **"Añadir Carpeta"**.
-- Cuadrícula responsiva (5 tarjetas por fila en escritorio estándar).
-- Cada tarjeta contiene:
-  - Portada de 160x240 px con radio de 8px (o contenedor de reemplazo si no hay imagen).
-  - Título recortado con elipsis a 20 caracteres para evitar desbordamientos.
-  - Metadatos formateados (Año, Número de entrega o tipo de archivo).
-  - Botón de edición de metadatos accesible debajo de la portada.
-
-### C. Visor de Cómics (`app/src/ui/reader.rs`)
-- Modo inmersivo con fondo negro puro (`#000000`).
-- Canvas interactivo (`PageViewer`):
-  - Renderiza la página aplicando una matriz de transformación afín: `translate(center + pan)` y `scale(zoom)`.
-  - Zoom dinámico mediante rueda del ratón entre `0.1x` y `5.0x`.
-  - Paneo continuo arrastrando el cursor del ratón (`mouse_area` con interacción `Grabbing`).
-- Barra de control superior e inferior ocultable/mostrable mediante un solo clic en la página.
-- Navegación bidireccional por botones en pantalla y teclas de flecha (`←` / `→`), con escape (`Esc`) para salir.
-
-### D. Modales de Edición y Superposiciones
-- Los modales (`metadata_editor.rs`, `collection_editor.rs`, `trusted_devices.rs`, `qr_overlay`) se implementan como capas superpuestas con el macro `stack!`.
-- Anchura fija centrada (450px) con fondo oscuro contrastado (`#10101c`) y borde primario sutil.
-- Cierre mediante botón de cruz (SVG) o tecla de escape.
+Las interfaces deben permitir la selección de diferentes estrategias de renderizado de lectura:
+1. **Página Simple**: Modo predeterminado para escritorio y smartphones en vertical.
+2. **Doble Página**: Modo optimizado para pantallas panorámicas y tabletas en orientación horizontal.
+3. **Lectura Vertical Continua (*Webtoon*)**: Desplazamiento vertical fluido de páginas en cascada.
 
 ---
 
-## 4. Guía del Lector Web Remoto (SPA Embebida)
+## 4. Guía de Componentes de Escritorio (Iced)
 
-1. **Autonomía Total**:
-   - Todo el código HTML, CSS y JS reside en `WEB_PAGE` dentro de `app/src/server.rs`.
-   - PROHIBIDO incluir enlaces a hojas de estilo remotas, fuentes de Google Fonts o librerías de terceros (React, Tailwind, Axios).
-2. **Experiencia Táctil (*Mobile Gestures*)**:
-   - Escucha los eventos `touchstart` y `touchend` en el visor para detectar gestos de deslizamiento horizontal (*swipe*):
-     - Deslizamiento hacia la derecha (> 60px): página anterior.
-     - Deslizamiento hacia la izquierda (< -60px): página siguiente.
-3. **Persistencia de Sesión Local**:
-   - Al cargar la página con el parámetro `?token=...`, se almacena inmediatamente en el `localStorage` del dispositivo bajo la clave `comic_token`.
-   - Toda petición asíncrona (`apiFetch`) inyecta la cabecera `Authorization: Bearer <token>`.
-4. **Modo de Diagnóstico Rápido**:
-   - La SPA incluye un botón flotante `ID` que despliega una consola superpuesta en pantalla (`debugInfo`) mostrando IP, fragmento del token, User-Agent y estado de conectividad para facilitar el soporte al usuario sin necesidad de herramientas de desarrollador en dispositivos móviles.
+- **Barra Lateral (`sidebar.rs`)**: Navegación con scroll independiente, menú contextual con clic derecho para colecciones, alternador de servidor HTTP y gestión de dispositivos de confianza.
+- **Cuadrícula de Cómics (`comic_grid.rs`)**: Fondo decorativo dinámico con `MeshGradient` sobre Canvas, tarjetas con portadas (160x240 px, radio 8px), títulos truncados y botón de edición.
+- **Visor de Cómics (`reader.rs`)**: Pantalla inmersiva con Canvas interactivo (`PageViewer`), traslación continua (*pan*) y escalado continuo (*zoom*) entre `0.1x` y `5.0x`.
+- **Modales flotantes**: Implementados con `stack!` centrados en pantalla (ancho 450px) para metadatos, edición de colección y dispositivos de confianza.
 
 ---
 
-## 5. Reglas de Idioma y Estilo
+## 5. Guía del Lector Web Remoto (SPA Embebida)
 
-- Todas las etiquetas de interfaz, mensajes de confirmación, diálogos y descripciones DEBEN estar redactados exclusivamente en español.
-- No se permiten alteraciones de color no documentadas o que rompan la armonía de los tokens declarados en este documento.
+- **Streaming Bajo Demanda**: Consume páginas individuales a través de la API REST sin descargar el cómic completo.
+- **Gestos Táctiles**: Soporte nativo para eventos táctiles (`touchstart`, `touchend`) con cambio de página al superar un umbral de 60px de deslizamiento horizontal (*swipe*).
+- **Persistencia**: Token de sesión almacenado en `localStorage` (`comic_token`).
+- **Autonomía**: Prohibido el uso de CDNs, frameworks externos o librerías de internet.
+
+---
+
+## 6. Idioma
+
+Todas las etiquetas, textos y mensajes de la interfaz de usuario DEBEN estar escritos exclusivamente en español.

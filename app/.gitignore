@@ -2,6 +2,10 @@
 target/
 /release
 release/
+/data
+data/
+/.cache
+.cache/
 log/
 *.log
 comic.db*

@@ -1,24 +1,40 @@
-mod db;
-mod comic_reader;
-mod qr;
-mod server;
-mod ui;
+pub mod domain;
+pub mod application;
+pub mod adapters;
+pub mod ingestion;
+pub mod network;
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::path::PathBuf;
 
 use iced::widget::{button, column, container, image, row, stack, text, svg, Space};
 use iced::keyboard;
 use iced::{Alignment, Element, Font, Length, Subscription, Task, Theme};
 use tracing::{info, warn, error, debug};
-
-use db::{Collection, Comic, Database};
+use crate::domain::collection::Collection;
+use crate::domain::comic::Comic;
+use crate::domain::device::TrustedDevice;
+use crate::adapters::inbound::desktop_ui as ui;
 use ui::metadata_editor::MetadataForm;
 
-const DB_URL: &str = "sqlite://comic.db?mode=rwc";
+use crate::application::facade::ComicFacade;
+use crate::application::catalog_service::CatalogService;
+use crate::application::reader_service::ReaderService;
+use crate::adapters::outbound::persistence::SqliteComicRepository;
+use crate::adapters::outbound::file_readers::{CbzAdapter, CbrAdapter};
+use crate::adapters::outbound::cache::DiskImageCache;
+use crate::domain::ports::ComicFileReader;
+
+const DB_URL: &str = "sqlite://data/comic.db?mode=rwc";
 const SERVER_PORT: u16 = 8080;
 
 fn main() -> iced::Result {
-    // Initialize logging to ./log/ with daily rotation
+    // Inicializar directorio de base de datos
+    let data_dir = std::path::Path::new("data");
+    std::fs::create_dir_all(data_dir).expect("No se pudo crear el directorio de datos");
+
+    // Inicializar logging en ./log/ con rotación diaria
     let log_dir = std::path::Path::new("log");
     std::fs::create_dir_all(log_dir).expect("No se pudo crear el directorio de logs");
 
@@ -78,7 +94,7 @@ pub enum AppView {
 struct ComicApp {
     // State
     view: AppView,
-    db: Option<Database>,
+    facade: Option<ComicFacade>,
     error_message: Option<String>,
 
     // Collections
@@ -138,7 +154,7 @@ struct ComicApp {
 #[derive(Debug, Clone)]
 pub enum Message {
     // Init
-    DbConnected(Result<Database, String>),
+    DbConnected(Result<ComicFacade, String>),
     CollectionsLoaded(Vec<Collection>),
 
     // Collections
@@ -202,7 +218,7 @@ pub enum Message {
 
     // Trusted Devices
     ManageTrustedDevices,
-    TrustedDevicesLoaded(Vec<db::TrustedDevice>),
+    TrustedDevicesLoaded(Vec<TrustedDevice>),
     AddTrustedDevice,
     TrustedQRGenerated(String, iced::widget::image::Handle),
     DeleteTrustedDevice(i64),
@@ -231,7 +247,7 @@ impl ComicApp {
     fn new() -> (Self, Task<Message>) {
         let app = Self {
             view: AppView::Loading,
-            db: None,
+            facade: None,
             error_message: None,
             collections: Vec::new(),
             selected_collection_id: None,
@@ -274,9 +290,27 @@ impl ComicApp {
 
         let task = Task::perform(
             async {
-                Database::connect(DB_URL)
+                let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                    .max_connections(5)
+                    .connect(DB_URL)
                     .await
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.to_string())?;
+
+                crate::adapters::outbound::persistence::schema::initialize_schema(&pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let repo = Arc::new(SqliteComicRepository::new(pool));
+                let readers: Vec<Arc<dyn ComicFileReader>> = vec![
+                    Arc::new(CbzAdapter::new()),
+                    Arc::new(CbrAdapter::new()),
+                ];
+                let cache = Arc::new(DiskImageCache::new(PathBuf::from(".cache")));
+                let catalog = CatalogService::new(repo.clone(), repo.clone(), readers.clone());
+                let reader = ReaderService::new(repo.clone(), repo.clone(), cache, readers);
+                let facade = ComicFacade::new(catalog, reader, repo);
+
+                Ok(facade)
             },
             Message::DbConnected,
         );
@@ -285,10 +319,10 @@ impl ComicApp {
     }
 
     fn load_collections(&self) -> Task<Message> {
-        if let Some(db) = &self.db {
-            let db = db.clone();
+        if let Some(facade) = &self.facade {
+            let facade = facade.clone();
             Task::perform(
-                async move { db.get_collections().await.unwrap_or_default() },
+                async move { facade.get_collections().await.unwrap_or_default() },
                 Message::CollectionsLoaded,
             )
         } else {
@@ -331,18 +365,19 @@ impl ComicApp {
         match message {
             Message::DbConnected(result) => {
                 match result {
-                    Ok(db) => {
-                        info!("Conexión a SQLite establecida correctamente");
-                        self.db = Some(db.clone());
+                    Ok(facade) => {
+                        info!("Conexión a SQLite y servicios inicializados correctamente");
+                        let facade_for_load = facade.clone();
+                        self.facade = Some(facade);
                         self.view = AppView::Main;
                         return Task::perform(
-                            async move { db.get_collections().await.unwrap_or_default() },
+                            async move { facade_for_load.get_collections().await.unwrap_or_default() },
                             Message::CollectionsLoaded,
                         );
                     }
                     Err(e) => {
-                        error!("Error conectando a SQLite: {}", e);
-                        self.error_message = Some(format!("Error de BD: {}. Verifique el archivo comic.db", e));
+                        error!("Error inicializando persistencia: {}", e);
+                        self.error_message = Some(format!("Error de BD: {}. Verifique el archivo data/comic.db", e));
                         self.view = AppView::Main;
                     }
                 }
@@ -372,10 +407,10 @@ impl ComicApp {
                     self.selected_collection_name = c.name.clone();
                 }
                 self.comic_handles.clear();
-                if let Some(db) = &self.db {
-                    let db = db.clone();
+                if let Some(facade) = &self.facade {
+                    let facade = facade.clone();
                     return Task::perform(
-                        async move { db.get_comics_by_collection(id).await.unwrap_or_default() },
+                        async move { facade.get_comics_by_collection(id).await.unwrap_or_default() },
                         Message::ComicsLoaded,
                     );
                 }
@@ -398,10 +433,10 @@ impl ComicApp {
                 }
                 info!("Creando colección: '{}'", name);
                 self.show_new_collection = false;
-                if let Some(db) = &self.db {
-                    let db = db.clone();
+                if let Some(facade) = &self.facade {
+                    let facade = facade.clone();
                     return Task::perform(
-                        async move { db.create_collection(&name).await.map_err(|e| e.to_string()) },
+                        async move { facade.create_collection(&name).await.map_err(|e| e.to_string()) },
                         Message::CollectionCreated,
                     );
                 }
@@ -420,10 +455,10 @@ impl ComicApp {
             }
 
             Message::DeleteCollection(id) => {
-                if let Some(db) = &self.db {
-                    let db = db.clone();
+                if let Some(facade) = &self.facade {
+                    let facade = facade.clone();
                     return Task::perform(
-                        async move { db.delete_collection(id).await.map_err(|e| e.to_string()) },
+                        async move { facade.delete_collection(id).await.map_err(|e| e.to_string()) },
                         Message::CollectionDeleted,
                     );
                 }
@@ -460,7 +495,7 @@ impl ComicApp {
             }
 
             Message::ConfirmRename => {
-                if let (Some(id), Some(db)) = (self.renaming_collection, &self.db) {
+                if let (Some(id), Some(facade)) = (self.renaming_collection, &self.facade) {
                     let new_name = self.rename_input.trim().to_string();
                     if new_name.is_empty() {
                         warn!("Intento de renombrar con nombre vacío");
@@ -468,9 +503,17 @@ impl ComicApp {
                     }
                     info!("Renombrando colección id={} a '{}'", id, new_name);
                     self.renaming_collection = None;
-                    let db = db.clone();
+                    let facade = facade.clone();
+                    let col_opt = self.collections.iter().find(|c| c.id == id).cloned();
                     return Task::perform(
-                        async move { db.rename_collection(id, &new_name).await.map_err(|e| e.to_string()) },
+                        async move {
+                            if let Some(mut col) = col_opt {
+                                col.name = new_name;
+                                facade.update_collection(&col).await.map_err(|e| e.to_string())
+                            } else {
+                                Err("Colección no encontrada".to_string())
+                            }
+                        },
                         Message::CollectionRenamed,
                     );
                 }
@@ -497,12 +540,12 @@ impl ComicApp {
 
             Message::PathSelected(Some(path)) => {
                 info!("Carpeta seleccionada: {}", path);
-                if let (Some(db), Some(collection_id)) = (&self.db, self.selected_collection_id) {
-                    let db = db.clone();
+                if let (Some(facade), Some(collection_id)) = (&self.facade, self.selected_collection_id) {
+                    let facade = facade.clone();
                     let path_clone = path.clone();
                     return Task::perform(
                         async move {
-                            db.add_collection_path(collection_id, &path_clone)
+                            facade.add_collection_path(collection_id, &path_clone)
                                 .await
                                 .map(|_| ())
                                 .map_err(|e| e.to_string())
@@ -535,7 +578,7 @@ impl ComicApp {
                     Ok(new_comics) => {
                         info!("Escaneo completo: {} comics nuevos encontrados", new_comics.len());
                         for c in new_comics {
-                            debug!("  Comic: '{}' ({}) - {} páginas", c.title, c.file_type, c.page_count);
+                            debug!("  Comic: '{}' ({:?}) - {} páginas", c.title, c.format, c.page_count);
                         }
                     }
                     Err(e) => {
@@ -543,31 +586,27 @@ impl ComicApp {
                     }
                 }
                 self.is_scanning = false;
-                if let (Ok(new_comics), Some(db)) = (result, &self.db) {
+                if let (Ok(new_comics), Some(facade)) = (result, &self.facade) {
                     if new_comics.is_empty() {
-                        info!("No se encontraron comics nuevos");
-                        // Still reload to show current comics
+                        info!("No se encontraron cómics nuevos");
                         if let Some(collection_id) = self.selected_collection_id {
-                            let db = db.clone();
+                            let facade = facade.clone();
                             return Task::perform(
-                                async move { db.get_comics_by_collection(collection_id).await.unwrap_or_default() },
+                                async move { facade.get_comics_by_collection(collection_id).await.unwrap_or_default() },
                                 Message::ComicsLoaded,
                             );
                         }
                         return Task::none();
                     }
-                    let db = db.clone();
+                    let facade = facade.clone();
                     let collection_id = self.selected_collection_id;
                     return Task::perform(
                         async move {
                             for comic in &new_comics {
-                                match db.upsert_comic(comic).await {
-                                    Ok(id) => info!("Comic guardado: '{}' id={}", comic.title, id),
-                                    Err(e) => error!("Error guardando comic '{}': {}", comic.title, e),
-                                }
+                                let _ = facade.index_comic_file(comic.collection_id, &comic.file_path).await;
                             }
                             if let Some(cid) = collection_id {
-                                db.get_comics_by_collection(cid).await.unwrap_or_default()
+                                facade.get_comics_by_collection(cid).await.unwrap_or_default()
                             } else {
                                 Vec::new()
                             }
@@ -578,59 +617,43 @@ impl ComicApp {
             }
 
             Message::ComicsLoaded(comics) => {
-                info!("Comics cargados para mostrar: {}", comics.len());
+                info!("Cómics cargados para mostrar: {}", comics.len());
                 self.comics = comics;
-                // Load covers
+                let facade_opt = self.facade.clone();
                 let tasks: Vec<Task<Message>> = self.comics.iter().map(|comic| {
                     let id = comic.id;
                     if comic.cover_data.is_some() {
                         let data = comic.cover_data.clone();
                         Task::perform(async move { (id, data) }, |(id, data)| Message::CoverLoaded(id, data))
-                    } else {
-                        let file_path = comic.file_path.clone();
-                        let title = comic.title.clone();
+                    } else if let Some(ref facade) = facade_opt {
+                        let facade = facade.clone();
                         Task::perform(
                             async move {
-                                debug!("Extrayendo portada de: '{}'", title);
-                                let cover = comic_reader::extract_cover(&file_path);
+                                let cover = facade.get_cover_image(id).await.ok();
                                 (id, cover)
                             },
                             |(id, data)| Message::CoverLoaded(id, data),
                         )
+                    } else {
+                        Task::none()
                     }
                 }).collect();
                 return Task::batch(tasks);
             }
 
             Message::CoverLoaded(id, Some(data)) => {
-                let handle = image::Handle::from_bytes(data.clone());
+                let handle = image::Handle::from_bytes(data);
                 self.comic_handles.insert(id, handle);
-
-                // Also save cover to DB if the comic didn't have one
-                if let Some(comic) = self.comics.iter().find(|c| c.id == id) {
-                    if comic.cover_data.is_none() {
-                        if let Some(db) = &self.db {
-                            let db = db.clone();
-                            let mut updated = comic.clone();
-                            updated.cover_data = Some(data);
-                            return Task::perform(
-                                async move { let _ = db.upsert_comic(&updated).await; },
-                                |_| Message::MetadataSaved(Ok(())),
-                            );
-                        }
-                    }
-                }
             }
 
             Message::CoverLoaded(_, None) => {}
 
             Message::OpenComic(id) => {
                 if let Some(comic) = self.comics.iter().find(|c| c.id == id) {
-                    info!("Abriendo comic: '{}' ({} páginas)", comic.title, comic.page_count);
-                    let file_path = comic.file_path.clone();
+                    info!("Abriendo cómic: '{}' ({} páginas)", comic.title, comic.page_count);
                     self.reading_comic = Some(comic.clone());
                     self.current_page = 0;
-                    self.total_pages = comic.page_count as usize;
+                    self.total_pages = comic.page_count;
                     self.view = AppView::Reader;
                     self.is_loading_page = true;
                     self.page_handle = None;
@@ -638,10 +661,13 @@ impl ComicApp {
                     self.pan = iced::Vector::default();
                     self.show_reader_controls = true;
 
-                    return Task::perform(
-                        async move { comic_reader::get_full_page(&file_path, 0) },
-                        Message::PageLoaded,
-                    );
+                    if let Some(facade) = &self.facade {
+                        let facade = facade.clone();
+                        return Task::perform(
+                            async move { facade.get_page_image(id, 0, None).await.ok() },
+                            Message::PageLoaded,
+                        );
+                    }
                 }
             }
 
@@ -661,12 +687,15 @@ impl ComicApp {
                     self.is_loading_page = true;
                     self.page_handle = None;
                     if let Some(comic) = &self.reading_comic {
-                        let file_path = comic.file_path.clone();
+                        let comic_id = comic.id;
                         let page = self.current_page;
-                        return Task::perform(
-                            async move { comic_reader::get_full_page(&file_path, page) },
-                            Message::PageLoaded,
-                        );
+                        if let Some(facade) = &self.facade {
+                            let facade = facade.clone();
+                            return Task::perform(
+                                async move { facade.get_page_image(comic_id, page, None).await.ok() },
+                                Message::PageLoaded,
+                            );
+                        }
                     }
                 }
             }
@@ -677,12 +706,15 @@ impl ComicApp {
                     self.is_loading_page = true;
                     self.page_handle = None;
                     if let Some(comic) = &self.reading_comic {
-                        let file_path = comic.file_path.clone();
+                        let comic_id = comic.id;
                         let page = self.current_page;
-                        return Task::perform(
-                            async move { comic_reader::get_full_page(&file_path, page) },
-                            Message::PageLoaded,
-                        );
+                        if let Some(facade) = &self.facade {
+                            let facade = facade.clone();
+                            return Task::perform(
+                                async move { facade.get_page_image(comic_id, page, None).await.ok() },
+                                Message::PageLoaded,
+                            );
+                        }
                     }
                 }
             }
@@ -733,15 +765,15 @@ impl ComicApp {
             }
 
             Message::SaveMetadata => {
-                if let (Some(form), Some(db)) = (self.editing_form.take(), &self.db) {
-                    if let Some(comic) = self.comics.iter().find(|c| c.id == form.comic_id) {
+                if let (Some(form), Some(facade)) = (self.editing_form.take(), &self.facade) {
+                    if let Some(_comic) = self.comics.iter().find(|c| c.id == form.comic_id) {
                         info!("Guardando metadatos: '{}' año={} num={} saga={}", form.title, form.year, form.issue_number, form.saga);
-                        let db = db.clone();
-                        let mut updated = comic.clone();
-                        updated.title = form.title;
-                        updated.year = form.year.parse().ok();
-                        updated.issue_number = form.issue_number.parse().ok();
-                        updated.saga = if form.saga.is_empty() {
+                        let facade = facade.clone();
+                        let comic_id = form.comic_id;
+                        let title = form.title;
+                        let year = form.year.parse().ok();
+                        let issue_number = form.issue_number.parse().ok();
+                        let saga = if form.saga.is_empty() {
                             None
                         } else {
                             Some(form.saga)
@@ -749,7 +781,10 @@ impl ComicApp {
 
                         return Task::perform(
                             async move {
-                                db.upsert_comic(&updated).await.map(|_| ()).map_err(|e| e.to_string())
+                                facade.update_comic_metadata(comic_id, &title, year, issue_number, saga.as_deref())
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(|e| e.to_string())
                             },
                             Message::MetadataSaved,
                         );
@@ -759,10 +794,10 @@ impl ComicApp {
 
             Message::MetadataSaved(Ok(())) => {
                 if let Some(collection_id) = self.selected_collection_id {
-                    if let Some(db) = &self.db {
-                        let db = db.clone();
+                    if let Some(facade) = &self.facade {
+                        let facade = facade.clone();
                         return Task::perform(
-                            async move { db.get_comics_by_collection(collection_id).await.unwrap_or_default() },
+                            async move { facade.get_comics_by_collection(collection_id).await.unwrap_or_default() },
                             Message::ComicsLoaded,
                         );
                     }
@@ -812,16 +847,17 @@ impl ComicApp {
                 }
             }
             Message::SaveCollectionEditor => {
-                if let (Some(form), Some(db)) = (&self.collection_editor_form, &self.db) {
+                if let (Some(form), Some(facade)) = (&self.collection_editor_form, &self.facade) {
                     let col = Collection {
                         id: form.id,
                         name: form.name.clone(),
                         icon_data: form.icon_data.clone(),
+                        created_at: chrono::Utc::now(),
                     };
-                    let db = db.clone();
+                    let facade = facade.clone();
                     return Task::perform(
                         async move {
-                            db.update_collection(&col).await.map_err(|e| e.to_string())
+                            facade.update_collection(&col).await.map_err(|e| e.to_string())
                         },
                         Message::CollectionEditorSaved,
                     );
@@ -842,23 +878,23 @@ impl ComicApp {
                     // Just show QR if already running
                     self.show_qr = true;
                 } else {
-                    if let Some(db) = &self.db {
-                        let db = db.clone();
+                    if let Some(facade) = &self.facade {
+                        let facade = facade.clone();
                         let port = SERVER_PORT;
                         
-                        // Generate a secure session token
-                        let token = uuid::Uuid::new_v4().to_string().replace("-", "")[..16].to_string();
+                        // Generar token de sesión seguro
+                        let token = uuid::Uuid::new_v4().to_string().replace('-', "")[..16].to_string();
                         info!("Token de seguridad generado: ******");
                         
                         self.server_running = true;
-                        let url = qr::get_server_url(port, Some(&token));
+                        let url = network::qr::get_server_url(port, Some(&token));
                         info!("Iniciando servidor HTTP en {}", url);
                         self.server_url = Some(url.clone());
                         self.server_token = Some(token.clone());
                         self.show_qr = true;
 
-                        // Generate QR
-                        if let Some((data, w, h)) = qr::generate_qr_image(&url, 256) {
+                        // Generar código QR
+                        if let Some((data, w, h)) = network::qr::generate_qr_image(&url, 256) {
                             info!("Código QR generado ({}x{})", w, h);
                             self.qr_handle = Some(image::Handle::from_rgba(w, h, data));
                         }
@@ -868,19 +904,21 @@ impl ComicApp {
 
                         return Task::perform(
                             async move {
-                                let state = server::ServerState { db, token };
-                                let router = server::create_router(state);
-                                let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
-                                    .await
-                                    .expect("Cannot bind to port");
-                                info!("Servidor HTTP escuchando en 0.0.0.0:{}", port);
-                                
-                                axum::serve(listener, router)
-                                    .with_graceful_shutdown(async move {
-                                        rx.await.ok();
-                                        info!("Apagando servidor HTTP Axum...");
-                                    })
-                                    .await.ok();
+                                let state = adapters::inbound::rest_api::ServerState { facade, session_token: token };
+                                let router = adapters::inbound::rest_api::create_router(state);
+                                if let Ok(listener) = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await {
+                                    info!("Servidor HTTP escuchando en 0.0.0.0:{}", port);
+                                    let mdns_handle = network::mdns::MdnsAnnouncer::start(port);
+                                    let _ = axum::serve(listener, router)
+                                        .with_graceful_shutdown(async move {
+                                            rx.await.ok();
+                                            mdns_handle.abort();
+                                            info!("Apagando servidor HTTP Axum y anunciador mDNS...");
+                                        })
+                                        .await;
+                                } else {
+                                    error!("No se pudo enlazar al puerto {}", port);
+                                }
                             },
                             |_| Message::ServerStarted,
                         );
@@ -975,10 +1013,10 @@ impl ComicApp {
             }
 
             Message::ManageTrustedDevices => {
-                if let Some(db) = &self.db {
-                    let db = db.clone();
+                if let Some(facade) = &self.facade {
+                    let facade = facade.clone();
                     return Task::perform(
-                        async move { db.get_trusted_devices().await.unwrap_or_default() },
+                        async move { facade.get_trusted_devices().await.unwrap_or_default() },
                         Message::TrustedDevicesLoaded,
                     );
                 }
@@ -987,21 +1025,20 @@ impl ComicApp {
                 self.trusted_devices_form = Some(ui::trusted_devices::TrustedDevicesForm::new(devices));
             }
             Message::AddTrustedDevice => {
-                if let Some(db) = &self.db {
-                    let db = db.clone();
+                if let Some(facade) = &self.facade {
+                    let facade = facade.clone();
                     let server_url = self.server_url.clone();
                     info!("[UI] Iniciando registro de dispositivo recurrente");
                     return Task::perform(
                         async move {
                             if let Some(name) = prompt_name().await {
                                 info!("[UI] Nombre recibido: {}", name);
-                                let token = uuid::Uuid::new_v4().to_string().replace("-", "")[..16].to_string();
-                                if db.add_trusted_device(&token, &name).await.is_ok() {
+                                if let Ok(device) = facade.add_trusted_device(&name).await {
                                     let url = if let Some(existing_url) = server_url {
                                         let base = existing_url.split('?').next().unwrap_or(&existing_url);
-                                        format!("{}?token={}", base, token)
+                                        format!("{}?token={}", base, device.token)
                                     } else {
-                                        crate::qr::get_server_url(8080, Some(&token))
+                                        crate::network::qr::get_server_url(8080, Some(&device.token))
                                     };
 
                                     info!("[UI] Generando QR para: {}", url);
@@ -1014,7 +1051,7 @@ impl ComicApp {
                                     error!("[UI] Error guardando dispositivo en DB");
                                 }
                             } else {
-                                info!("[UI] Dialogo de nombre cancelado o vacio");
+                                info!("[UI] Diálogo de nombre cancelado o vacío");
                             }
                             None
                         },
@@ -1035,10 +1072,10 @@ impl ComicApp {
                 return self.update(Message::ManageTrustedDevices);
             }
             Message::DeleteTrustedDevice(id) => {
-                if let Some(db) = &self.db {
-                    let db = db.clone();
+                if let Some(facade) = &self.facade {
+                    let facade = facade.clone();
                     return Task::perform(
-                        async move { db.delete_trusted_device(id).await.map_err(|e| e.to_string()) },
+                        async move { facade.delete_trusted_device(id).await.map_err(|e| e.to_string()) },
                         Message::TrustedDeviceDeleted,
                     );
                 }
@@ -1112,7 +1149,7 @@ impl ComicApp {
                         column![
                             text("⚠️ Error de Conexión").size(24),
                             text(err).size(14),
-                            text("Asegúrate de que el archivo comic.db no esté bloqueado").size(12),
+                            text("Asegúrate de que el archivo data/comic.db no esté bloqueado").size(12),
                         ]
                         .spacing(10)
                         .align_x(iced::Alignment::Center),
@@ -1211,56 +1248,19 @@ impl ComicApp {
     // === Helpers ===
 
     fn reload_collections(&self) -> Task<Message> {
-        if let Some(db) = &self.db {
-            let db = db.clone();
-            Task::perform(
-                async move { db.get_collections().await.unwrap_or_default() },
-                Message::CollectionsLoaded,
-            )
-        } else {
-            Task::none()
-        }
+        self.load_collections()
     }
 
     fn scan_collection_paths(&self) -> Task<Message> {
-        if let (Some(db), Some(collection_id)) = (&self.db, self.selected_collection_id) {
-            let db = db.clone();
+        if let (Some(facade), Some(collection_id)) = (&self.facade, self.selected_collection_id) {
+            let facade = facade.clone();
             Task::perform(
                 async move {
-                    let paths = db
-                        .get_collection_paths(collection_id)
-                        .await
-                        .map_err(|e| e.to_string())?;
-
-                    let mut new_comics = Vec::new();
-                    for cp in &paths {
-                        let scanned = comic_reader::scan_directory(&cp.path);
-                        for sc in scanned {
-                            let exists = db
-                                .comic_exists_by_path(&sc.file_path)
-                                .await
-                                .unwrap_or(true);
-                            if !exists {
-                                let page_count = comic_reader::get_page_count(&sc.file_path);
-                                let cover = comic_reader::extract_cover(&sc.file_path);
-                                new_comics.push(Comic {
-                                    id: 0,
-                                    collection_id,
-                                    title: sc.file_name,
-                                    file_path: sc.file_path,
-                                    file_type: sc.format.as_str().to_string(),
-                                    year: None,
-                                    issue_number: None,
-                                    saga: None,
-                                    cover_data: cover,
-                                    page_count: page_count as i32,
-                                });
-                            }
-                        }
-                    }
-                    Ok(new_comics)
+                    let worker = ingestion::IngestionWorker::new(facade.clone(), None);
+                    let _ = worker.scan_collection(collection_id).await;
+                    facade.get_comics_by_collection(collection_id).await.unwrap_or_default()
                 },
-                Message::ScanComplete,
+                Message::ComicsLoaded,
             )
         } else {
             Task::none()
@@ -1469,7 +1469,7 @@ async fn pick_image() -> Option<String> {
 }
 /// Generate a QR code as an iced image Handle
 fn generate_qr(url: &str) -> Option<iced::widget::image::Handle> {
-    if let Some((rgba, w, h)) = crate::qr::generate_qr_image(url, 256) {
+    if let Some((rgba, w, h)) = crate::network::qr::generate_qr_image(url, 256) {
         Some(iced::widget::image::Handle::from_rgba(w, h, rgba))
     } else {
         None

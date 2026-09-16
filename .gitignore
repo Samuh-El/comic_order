@@ -24,6 +24,8 @@ app/release/
 # Base de datos SQLite local y archivos de transacción WAL / SHM
 /app/comic.db*
 app/comic.db*
+/app/data/
+app/data/
 *.db
 *.db-shm
 *.db-wal
@@ -35,6 +37,11 @@ app/comic.db*
 /app/log/
 app/log/
 *.log
+
+# Directorio de caché local
+/app/.cache/
+app/.cache/
+.cache/
 
 # Archivos temporales y de diagnóstico
 app/check_errors.txt
