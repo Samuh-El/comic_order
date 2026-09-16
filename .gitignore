@@ -1,5 +1,47 @@
-/target
-log/
-comic.db*
-/release
-release/
+# Documentación de herramientas
+docs/Uso_speckit.md
+
+# Configuración de entornos y herramientas de IA
+.agents
+.vscode
+.idea/
+
+# ==========================================
+# Carpeta de la aplicación (app/)
+# ==========================================
+
+# Artefactos de compilación de Rust y binarios
+/app/target/
+app/target/
+/app/release/
+app/release/
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Base de datos SQLite local y archivos de transacción WAL / SHM
+/app/comic.db*
+app/comic.db*
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Archivos de log y trazas de ejecución
+/app/log/
+app/log/
+*.log
+
+# Archivos temporales y de diagnóstico
+app/check_errors.txt
+*.tmp
+*.bak
+
+# Archivos de sistema operativo
+Thumbs.db
+desktop.ini
+.DS_Store

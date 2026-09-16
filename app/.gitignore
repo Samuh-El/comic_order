@@ -1,0 +1,15 @@
+/target
+target/
+/release
+release/
+log/
+*.log
+comic.db*
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+check_errors.txt
+*.pdb
+*.exe
+*.dll
