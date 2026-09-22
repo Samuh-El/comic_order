@@ -348,18 +348,36 @@
 
   <!-- 4. MODAL DE DISPOSITIVOS DE CONFIANZA -->
   <div class="dossier-modal-overlay" id="devices-modal">
-    <div class="dossier-dialog">
+    <div class="dossier-dialog devices-dialog">
       <button class="dossier-close-btn modal-close-trigger" title="Cerrar">✕</button>
+      
       <div class="dossier-header-bar">
+        <span class="universe-badge">SEGURIDAD Y RED LOCAL</span>
         <h2 class="dossier-hero-name">DISPOSITIVOS DE CONFIANZA</h2>
+        <p class="devices-modal-desc">
+          Autoriza teléfonos, tablets u ordenadores en tu red local para leer cómics y sincronizar el progreso de lectura sin introducir tokens manualmente.
+        </p>
       </div>
+
       <div class="devices-body">
-        <div class="devices-add-row">
-          <input type="text" id="input-new-device-name" placeholder="Nombre del dispositivo (ej. iPad de Samuel)">
-          <button type="button" id="btn-add-device" class="btn-picker">+ Autorizar</button>
+        <div class="devices-add-box">
+          <label class="devices-input-label" for="input-new-device-name">AUTORIZAR NUEVO DISPOSITIVO</label>
+          <div class="devices-add-row">
+            <input type="text" id="input-new-device-name" class="device-input" placeholder="Nombre o alias del dispositivo (ej. iPad de Samuel, Galaxy Tab...)" maxlength="50">
+            <button type="button" id="btn-add-device" class="btn-authorize-device">
+              <span>+ Autorizar</span>
+            </button>
+          </div>
         </div>
-        <div class="devices-list" id="devices-list-container">
-          <!-- Listado de dispositivos -->
+
+        <div class="devices-list-section">
+          <div class="devices-list-header">
+            <span class="devices-list-title">// DISPOSITIVOS ACTIVOS</span>
+            <span class="devices-count-badge" id="devices-count-tag">0 ACTIVOS</span>
+          </div>
+          <div class="devices-list" id="devices-list-container">
+            <!-- Listado de dispositivos inyectado dinámicamente -->
+          </div>
         </div>
       </div>
     </div>
@@ -370,8 +388,15 @@
     <div class="reader-top-bar">
       <button id="reader-close-btn" class="reader-btn">✕ Salir</button>
       <span class="reader-title" id="reader-comic-title">Título del Cómic</span>
-      <div class="reader-page-indicator">
-        <span id="reader-current-page">1</span> / <span id="reader-total-pages">1</span>
+      <div class="reader-top-controls">
+        <div class="reader-zoom-controls">
+          <button id="reader-zoom-out-btn" class="reader-btn zoom-btn" title="Alejar (o Scroll abajo)">−</button>
+          <span id="reader-zoom-level" class="reader-zoom-tag" title="Zoom actual (Clic o Doble Clic para 100%)">100%</span>
+          <button id="reader-zoom-in-btn" class="reader-btn zoom-btn" title="Acercar (o Scroll arriba)">+</button>
+        </div>
+        <div class="reader-page-indicator">
+          <span id="reader-current-page">1</span> / <span id="reader-total-pages">1</span>
+        </div>
       </div>
     </div>
 

@@ -12,6 +12,14 @@ let currentReadingComicIndex = -1;
 let currentReadingPage = 0;
 let currentReadingTotalPages = 1;
 
+// ESTADO DE ZOOM Y PANEO DEL VISOR
+let readerZoom = 1.0;
+let readerPanX = 0;
+let readerPanY = 0;
+let isPanning = false;
+let startPanX = 0;
+let startPanY = 0;
+
 // HELPER DE COMUNICACIÓN IPC CON TAURI
 async function invokeBackend(command, args = {}) {
   if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
@@ -72,6 +80,7 @@ function closeAllModals() {
 // INICIALIZACIÓN AL CARGAR LA PÁGINA
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
+  setupReaderZoomAndPan();
   setupGlitchCanvas();
   await loadCollections();
   await loadServerStatus();
@@ -121,8 +130,11 @@ function setupEventListeners() {
       const result = await invokeBackend('scan_monitored_paths');
       alert(`Escaneo completado: ${result} cómics actualizados`);
       await loadCollections();
-      if (activeCollectionId) {
-        await showCollectionComicsView(activeCollectionId);
+      
+      // Solo refrescar la grilla de cómics si el usuario ya se encuentra en la vista de colección
+      const comicsView = document.getElementById('collection-comics-view');
+      if (comicsView && comicsView.style.display !== 'none' && activeCollectionId) {
+        await refreshActiveCollectionComics();
       }
     } catch (err) {
       alert(`Error al escanear: ${err}`);
@@ -135,12 +147,8 @@ function setupEventListeners() {
     btn.disabled = true;
     btn.textContent = '🔄 Escaneando...';
     try {
-      const result = await invokeBackend('scan_monitored_paths');
-      if (activeCollectionId) {
-        await showCollectionComicsView(activeCollectionId);
-      } else {
-        await loadCollections();
-      }
+      await invokeBackend('scan_monitored_paths');
+      await refreshActiveCollectionComics();
     } catch (err) {
       alert(`Error al escanear: ${err}`);
     } finally {
@@ -199,8 +207,8 @@ function setupEventListeners() {
     }
   });
 
-  // Añadir Dispositivo de Confianza
-  document.getElementById('btn-add-device').addEventListener('click', async () => {
+  // Añadir Dispositivo de Confianza (Clic o tecla Enter)
+  const handleAddDevice = async () => {
     const nameInput = document.getElementById('input-new-device-name');
     const name = nameInput.value.trim();
     if (!name) return;
@@ -211,9 +219,20 @@ function setupEventListeners() {
     } catch (err) {
       alert(`Error al añadir dispositivo: ${err}`);
     }
-  });
+  };
 
-  // Visor de Cómic - Controles
+  document.getElementById('btn-add-device').addEventListener('click', handleAddDevice);
+  const deviceInput = document.getElementById('input-new-device-name');
+  if (deviceInput) {
+    deviceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleAddDevice();
+      }
+    });
+  }
+
+  // Visor de Cómic - Controles de Navegación
   document.getElementById('reader-close-btn').addEventListener('click', () => {
     closeReader();
   });
@@ -227,6 +246,20 @@ function setupEventListeners() {
   document.getElementById('reader-prev-btn').addEventListener('click', () => changeReaderPage(-1));
   document.getElementById('reader-next-btn').addEventListener('click', () => changeReaderPage(1));
 
+  // Botones de Zoom en Barra Superior
+  const btnZoomIn = document.getElementById('reader-zoom-in-btn');
+  if (btnZoomIn) {
+    btnZoomIn.addEventListener('click', () => setReaderZoom(readerZoom * 1.25));
+  }
+  const btnZoomOut = document.getElementById('reader-zoom-out-btn');
+  if (btnZoomOut) {
+    btnZoomOut.addEventListener('click', () => setReaderZoom(readerZoom * 0.8));
+  }
+  const zoomLevelTag = document.getElementById('reader-zoom-level');
+  if (zoomLevelTag) {
+    zoomLevelTag.addEventListener('click', () => resetReaderZoom());
+  }
+
   // Navegación con teclado para el lector
   window.addEventListener('keydown', (e) => {
     const reader = document.getElementById('comic-reader');
@@ -235,6 +268,12 @@ function setupEventListeners() {
         changeReaderPage(1);
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         changeReaderPage(-1);
+      } else if (e.key === '+' || e.key === '=') {
+        setReaderZoom(readerZoom * 1.2);
+      } else if (e.key === '-' || e.key === '_') {
+        setReaderZoom(readerZoom * 0.8);
+      } else if (e.key === '0') {
+        resetReaderZoom();
       } else if (e.key === 'Escape') {
         closeReader();
       }
@@ -242,8 +281,132 @@ function setupEventListeners() {
   });
 }
 
+// CONFIGURACIÓN DE ZOOM Y PANEO INTERACTIVO EN EL VISOR
+function setupReaderZoomAndPan() {
+  const viewport = document.getElementById('reader-viewport');
+  const img = document.getElementById('reader-page-img');
+  if (!viewport) return;
+
+  // Deshabilitar comportamiento de arrastre fantasma nativo del navegador
+  if (img) {
+    img.setAttribute('draggable', 'false');
+    img.addEventListener('dragstart', (e) => e.preventDefault());
+  }
+
+  // Zoom continuo con la rueda del ratón (Scroll del mouse)
+  viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+    setReaderZoom(readerZoom * zoomFactor);
+  }, { passive: false });
+
+  // Paneo interactivo: EXCLUSIVAMENTE al mantener presionado el clic con zoom activo
+  viewport.addEventListener('mousedown', (e) => {
+    // Solo botón principal (izquierdo) y cuando exista zoom activo
+    if (e.button !== 0 || readerZoom <= 1.05) return;
+    
+    e.preventDefault();
+    isPanning = true;
+    startPanX = e.clientX - readerPanX;
+    startPanY = e.clientY - readerPanY;
+    viewport.classList.add('is-dragging');
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+
+    // Si el botón izquierdo no está actualmente presionado, detener de inmediato el arrastre
+    if ((e.buttons & 1) !== 1) {
+      isPanning = false;
+      viewport.classList.remove('is-dragging');
+      return;
+    }
+
+    e.preventDefault();
+    readerPanX = e.clientX - startPanX;
+    readerPanY = e.clientY - startPanY;
+    applyReaderTransform(false);
+  });
+
+  const stopPanning = () => {
+    if (isPanning) {
+      isPanning = false;
+      viewport.classList.remove('is-dragging');
+    }
+  };
+
+  window.addEventListener('mouseup', stopPanning);
+  window.addEventListener('blur', stopPanning);
+  viewport.addEventListener('mouseleave', (e) => {
+    // Si sale del viewport y no tiene presionado el clic
+    if ((e.buttons & 1) !== 1) {
+      stopPanning();
+    }
+  });
+
+  // Doble clic para alternar entre tamaño ajustado (100%) y aumento (200%)
+  viewport.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    if (readerZoom > 1.05) {
+      resetReaderZoom();
+    } else {
+      setReaderZoom(2.0);
+    }
+  });
+}
+
+function updateReaderCursorState() {
+  const viewport = document.getElementById('reader-viewport');
+  if (!viewport) return;
+  if (readerZoom > 1.05) {
+    viewport.classList.add('can-pan');
+  } else {
+    viewport.classList.remove('can-pan');
+    viewport.classList.remove('is-dragging');
+    isPanning = false;
+  }
+}
+
+function applyReaderTransform(animate = false) {
+  const img = document.getElementById('reader-page-img');
+  const zoomTag = document.getElementById('reader-zoom-level');
+  if (!img) return;
+
+  if (animate) {
+    img.style.transition = 'transform 0.12s ease-out, opacity 0.2s ease-out';
+  } else {
+    img.style.transition = 'none';
+  }
+
+  img.style.transform = `translate(${readerPanX}px, ${readerPanY}px) scale(${readerZoom})`;
+  if (zoomTag) {
+    zoomTag.textContent = `${Math.round(readerZoom * 100)}%`;
+  }
+  updateReaderCursorState();
+}
+
+function resetReaderZoom() {
+  readerZoom = 1.0;
+  readerPanX = 0;
+  readerPanY = 0;
+  isPanning = false;
+  applyReaderTransform(true);
+}
+
+function setReaderZoom(newZoom) {
+  const clampedZoom = Math.min(Math.max(newZoom, 0.5), 5.0);
+  if (clampedZoom <= 1.05) {
+    readerPanX = 0;
+    readerPanY = 0;
+    isPanning = false;
+  }
+  readerZoom = clampedZoom;
+  applyReaderTransform(true);
+}
+
 // CAMBIO DE VISTAS (HOME VS CATÁLOGO DE CÓMIC)
 function showHomeView() {
+  activeCollectionId = null;
   document.getElementById('collection-comics-view').style.display = 'none';
   const dock = document.querySelector('.bottom-dock');
 
@@ -258,6 +421,29 @@ function showHomeView() {
     document.getElementById('empty-state').style.display = 'none';
     if (dock) dock.style.display = 'block';
     renderActiveCollection();
+  }
+}
+
+async function refreshActiveCollectionComics() {
+  if (!activeCollectionId) return;
+  const col = collections.find(c => c.id === activeCollectionId);
+  if (!col) return;
+
+  const grid = document.getElementById('comics-catalog-grid');
+  const emptyState = document.getElementById('collection-empty-comics');
+
+  try {
+    const rawComics = await invokeBackend('get_comics_by_collection', { collectionId: col.id });
+    
+    // Ordenamiento natural estricto A-Z por título
+    activeCollectionComics = (rawComics || []).sort((a, b) => {
+      return (a.title || '').localeCompare(b.title || '', 'es', { numeric: true, sensitivity: 'base' });
+    });
+
+    document.getElementById('cv-comics-count').textContent = activeCollectionComics.length;
+    renderCollectionComicsGrid(activeCollectionComics);
+  } catch (err) {
+    grid.innerHTML = `<p style="color:#ef4444; font-size:14px; padding: 20px;">Error al cargar cómics: ${err}</p>`;
   }
 }
 
@@ -637,34 +823,77 @@ async function openQrModal() {
 async function openDevicesModal() {
   playSound('click');
   const container = document.getElementById('devices-list-container');
-  container.innerHTML = '<p style="color:#9ca3af; font-size:13px;">Cargando dispositivos...</p>';
+  const countTag = document.getElementById('devices-count-tag');
+  container.innerHTML = '<p style="color:#9ca3af; font-size:13px; padding: 12px 0;">Cargando dispositivos autorizados...</p>';
   openModal('devices-modal');
 
   try {
     const devices = await invokeBackend('get_trusted_devices');
     container.innerHTML = '';
-    if (devices.length === 0) {
-      container.innerHTML = '<p style="color:#9ca3af; font-size:13px;">No hay dispositivos registrados.</p>';
+    
+    const count = (devices || []).length;
+    if (countTag) {
+      countTag.textContent = `${count} ${count === 1 ? 'ACTIVO' : 'ACTIVOS'}`;
+    }
+
+    if (!devices || devices.length === 0) {
+      container.innerHTML = `
+        <div class="devices-empty-state">
+          <div class="empty-shield-icon">🛡️</div>
+          <div class="empty-shield-title">NO HAY DISPOSITIVOS REGISTRADOS</div>
+          <div class="empty-shield-desc">Ingresa un nombre arriba para autorizar un dispositivo o comparte el código QR.</div>
+        </div>
+      `;
     } else {
       devices.forEach(d => {
         const div = document.createElement('div');
-        div.className = 'dossier-comic-item';
+        div.className = 'device-card';
+
+        // Determinar icono según el nombre
+        const lowerName = (d.device_name || '').toLowerCase();
+        let icon = '📱';
+        if (lowerName.includes('pc') || lowerName.includes('mac') || lowerName.includes('laptop') || lowerName.includes('desktop') || lowerName.includes('computador')) {
+          icon = '💻';
+        } else if (lowerName.includes('ipad') || lowerName.includes('tablet') || lowerName.includes('tab')) {
+          icon = '📟';
+        }
+
+        const tokenSnippet = d.token ? `${d.token.substring(0, 10)}...` : '******';
+        const dateStr = d.created_at || 'Reciente';
+
         div.innerHTML = `
-          <div>
-            <div style="font-weight:700; color:#fff;">${d.device_name}</div>
-            <div style="font-size:11px; color:#a1a1aa;">Token: ${d.token.substring(0,8)}... | ${d.created_at}</div>
+          <div class="device-info-left">
+            <div class="device-avatar">${icon}</div>
+            <div class="device-details">
+              <div class="device-name">${d.device_name}</div>
+              <div class="device-meta">
+                <span class="device-token-badge" title="Token de autorización">🔑 ${tokenSnippet}</span>
+                <span>📅 ${dateStr}</span>
+                <span class="device-status-chip">● Activo</span>
+              </div>
+            </div>
           </div>
-          <button class="btn-picker" style="background:#ef4444; border:none; padding:4px 8px; font-size:11px;" data-id="${d.id}">Eliminar</button>
+          <button class="btn-revoke-device" data-id="${d.id}" title="Revocar autorización a este dispositivo">
+            ✕ Revocar
+          </button>
         `;
-        div.querySelector('button').addEventListener('click', async () => {
-          await invokeBackend('remove_trusted_device', { id: d.id });
-          await openDevicesModal();
+
+        div.querySelector('.btn-revoke-device').addEventListener('click', async () => {
+          if (confirm(`¿Deseas revocar la autorización para '${d.device_name}'?`)) {
+            try {
+              await invokeBackend('remove_trusted_device', { id: d.id });
+              await openDevicesModal();
+            } catch (err) {
+              alert(`Error al eliminar dispositivo: ${err}`);
+            }
+          }
         });
+
         container.appendChild(div);
       });
     }
   } catch (e) {
-    container.innerHTML = '<p style="color:#ef4444; font-size:13px;">Error al cargar dispositivos.</p>';
+    container.innerHTML = `<p style="color:#ef4444; font-size:13px; padding: 12px 0;">Error al cargar dispositivos: ${e}</p>`;
   }
 }
 
@@ -677,6 +906,7 @@ async function openReader(comicId, title, comicIndex = -1) {
   const finishOverlay = document.getElementById('reader-finish-overlay');
   if (finishOverlay) finishOverlay.classList.remove('active');
 
+  resetReaderZoom();
   document.getElementById('reader-comic-title').textContent = title;
   const reader = document.getElementById('comic-reader');
   if (reader) reader.classList.add('active');
@@ -685,6 +915,7 @@ async function openReader(comicId, title, comicIndex = -1) {
 }
 
 function closeReader() {
+  resetReaderZoom();
   const reader = document.getElementById('comic-reader');
   const finishOverlay = document.getElementById('reader-finish-overlay');
   if (reader) reader.classList.remove('active');
@@ -738,6 +969,7 @@ async function changeReaderPage(delta) {
     const finishOverlay = document.getElementById('reader-finish-overlay');
     if (finishOverlay) finishOverlay.classList.remove('active');
 
+    resetReaderZoom();
     currentReadingPage = newPage;
     await loadReaderPage();
   }
