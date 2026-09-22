@@ -83,11 +83,13 @@ impl Comic {
             ));
         }
 
+        let title_capped: String = trimmed_title.chars().take(40).collect();
+
         let now = Utc::now();
         Ok(Self {
             id,
             collection_id,
-            title: trimmed_title.to_string(),
+            title: title_capped,
             file_path,
             format,
             year: None,
@@ -154,5 +156,21 @@ mod tests {
         assert_eq!(comic.display_title(), "Batman #1 (Año Uno)");
         comic.year = Some(1987);
         assert_eq!(comic.display_title(), "Batman #1 (Año Uno) [1987]");
+    }
+
+    #[test]
+    fn test_comic_title_truncation_to_40_chars() {
+        let long_title = "A".repeat(80);
+        let comic = Comic::new(
+            1,
+            10,
+            long_title,
+            PathBuf::from("/comics/batman.cbz"),
+            ComicFormat::Cbz,
+            32,
+        )
+        .expect("Debería crear el cómic");
+
+        assert_eq!(comic.title.chars().count(), 40);
     }
 }

@@ -47,12 +47,27 @@ impl ComicFacade {
         self.catalog.list_collections().await
     }
 
+    pub async fn get_recent_collections(&self, limit: usize) -> Result<Vec<Collection>, DomainError> {
+        self.catalog.list_recent_collections(limit).await
+    }
+
     pub async fn get_collection_by_id(&self, id: i64) -> Result<Option<Collection>, DomainError> {
         self.catalog.get_collection(id).await
     }
 
     pub async fn create_collection(&self, name: &str) -> Result<i64, DomainError> {
         self.catalog.create_collection(name).await
+    }
+
+    pub async fn create_collection_with_details(
+        &self,
+        name: &str,
+        protagonist: Option<&str>,
+        description: Option<&str>,
+        background_image_path: Option<&str>,
+        hero_image_path: Option<&str>,
+    ) -> Result<i64, DomainError> {
+        self.catalog.create_collection_with_details(name, protagonist, description, background_image_path, hero_image_path).await
     }
 
     pub async fn update_collection(&self, collection: &Collection) -> Result<(), DomainError> {

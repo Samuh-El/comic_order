@@ -35,6 +35,10 @@ impl CatalogService {
         Ok(self.collection_repo.get_all().await?)
     }
 
+    pub async fn list_recent_collections(&self, limit: usize) -> Result<Vec<Collection>, DomainError> {
+        Ok(self.collection_repo.get_recent(limit).await?)
+    }
+
     pub async fn get_collection(&self, id: i64) -> Result<Option<Collection>, DomainError> {
         Ok(self.collection_repo.get_by_id(id).await?)
     }
@@ -42,6 +46,29 @@ impl CatalogService {
     pub async fn create_collection(&self, name: &str) -> Result<i64, DomainError> {
         let coll = Collection::new(0, name.to_string())?;
         Ok(self.collection_repo.create(&coll.name).await?)
+    }
+
+    pub async fn create_collection_with_details(
+        &self,
+        name: &str,
+        protagonist: Option<&str>,
+        description: Option<&str>,
+        background_image_path: Option<&str>,
+        hero_image_path: Option<&str>,
+    ) -> Result<i64, DomainError> {
+        let mut coll = Collection::new(0, name.to_string())?;
+        coll.protagonist = protagonist.map(|s| s.to_string());
+        coll.description = description.map(|s| s.to_string());
+        coll.background_image_path = background_image_path.map(|s| s.to_string());
+        coll.hero_image_path = hero_image_path.map(|s| s.to_string());
+        coll.validate()?;
+        Ok(self.collection_repo.create_with_details(
+            &coll.name,
+            coll.protagonist.as_deref(),
+            coll.description.as_deref(),
+            coll.background_image_path.as_deref(),
+            coll.hero_image_path.as_deref(),
+        ).await?)
     }
 
     pub async fn update_collection(&self, collection: &Collection) -> Result<(), DomainError> {

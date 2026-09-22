@@ -111,7 +111,7 @@ Los comandos `speckit.specify` y `speckit.clarify` operan en **modo interactivo 
 ## Spec activa
 
 <!-- SPECKIT START -->
-Plan vigente: `.specify/specs/001-reorganize-app-modular`
+Plan vigente: `.specify/specs/004-collection-comics-view`
 <!-- SPECKIT END -->
 
 ---

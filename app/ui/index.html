@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Comic Order - Showcase</title>
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-miles">
+
+  <!-- Background Glitch & Multiverse Canvas -->
+  <canvas id="glitch-canvas"></canvas>
+
+  <!-- Screen Halftone & Vignette Overlays -->
+  <div class="halftone-pattern-overlay"></div>
+  <div class="vignette-overlay"></div>
+
+  <div class="site-wrapper">
+
+    <!-- TOP NAVBAR -->
+    <header class="spidey-navbar">
+      <div class="navbar-container">
+        
+        <!-- Left Logo -->
+        <a href="#" class="logo-link" id="nav-home-logo" title="Comic Order">
+          <div class="logo-box">
+            <img src="assets/logo_crop.png" alt="Comic Logo" class="logo-image">
+          </div>
+        </a>
+
+        <!-- Main Navigation Links -->
+        <nav class="main-nav">
+          <ul class="nav-list">
+            <li class="nav-item"><a href="#" class="nav-link" id="nav-home-btn">INICIO</a></li>
+            
+            <!-- Dropdown Colecciones -->
+            <li class="nav-item dropdown">
+              <a href="#" class="nav-link dropdown-btn">
+                COLECCIONES <span class="caret">▾</span>
+              </a>
+              <ul class="dropdown-menu" id="nav-collections-menu">
+                <li class="dropdown-header">Mis Colecciones</li>
+                <li class="divider"></li>
+                <li><a href="#" id="btn-open-new-collection" class="highlight-action">+ Nueva Colección</a></li>
+              </ul>
+            </li>
+
+            <!-- Dropdown Cómics -->
+            <li class="nav-item dropdown">
+              <a href="#" class="nav-link dropdown-btn">
+                CÓMICS <span class="caret">▾</span>
+              </a>
+              <ul class="dropdown-menu">
+                <li><a href="#" id="btn-scan-library"><span class="menu-icon">🔄</span> Re-escanear Biblioteca</a></li>
+                <li class="divider"></li>
+                <li><a href="#" id="btn-open-all-comics">Explorar Todos los Cómics</a></li>
+              </ul>
+            </li>
+
+            <!-- Dropdown Servidor / QR -->
+            <li class="nav-item dropdown">
+              <a href="#" class="nav-link dropdown-btn">
+                SERVIDOR / QR <span class="caret">▾</span>
+              </a>
+              <ul class="dropdown-menu">
+                <li><a href="#" id="btn-open-qr-modal"><span class="menu-icon">📱</span> Compartir Biblioteca (QR)</a></li>
+                <li><a href="#" id="btn-open-devices-modal"><span class="menu-icon">🔒</span> Dispositivos de Confianza</a></li>
+                <li class="divider"></li>
+                <li class="server-status-item">
+                  <span class="status-indicator online"></span>
+                  <span id="nav-server-label">Servidor Activo (8080)</span>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </nav>
+
+      </div>
+    </header>
+
+    <!-- HERO MAIN SECTION -->
+    <main class="hero-section" id="hero-main-container">
+
+      <div class="hero-grid" id="hero-grid">
+        
+        <!-- LEFT COLUMN: Description Box with Overlapping Red Title and READ MORE CTA -->
+        <div class="hero-left">
+          
+          <div class="bio-and-title-wrapper">
+            
+            <!-- Super-Hero Moniker Title (SPIDER-MAN / BATMAN) -->
+            <div class="title-container">
+              <div class="title-backdrop-red" id="title-backdrop"></div>
+              <h1 class="main-title" id="main-title" data-text="SPIDER-MAN">SPIDER-MAN</h1>
+            </div>
+
+            <!-- Description Box -->
+            <div class="bio-box">
+              <div class="bio-box-inner">
+                <p id="bio-text">Cargando sinopsis de la colección...</p>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- READ MORE Button -->
+          <div class="cta-container">
+            <button class="read-more-btn" id="read-more-btn">
+              <span class="btn-skew-shape"></span>
+              <span class="btn-text">LEER MÁS</span>
+              <span class="btn-glitch-line"></span>
+            </button>
+          </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN: Character Stage -->
+        <div class="hero-right">
+          <div class="stage-container" id="stage-container">
+            
+            <!-- Comic Halftone Radial Burst -->
+            <div class="radial-halftone-aura"></div>
+            
+            <!-- Glitch Ghost Layers -->
+            <div class="ghost-art ghost-cyan" id="ghost-cyan"></div>
+            <div class="ghost-art ghost-magenta" id="ghost-magenta"></div>
+
+            <!-- Main Character Image Container -->
+            <div class="character-art-box" id="character-art-box">
+              <img id="character-main-img" src="" alt="Personaje Principal" class="character-img" style="display: none;">
+            </div>
+
+            <!-- Comic Speech Burst Pop -->
+            <div class="comic-speech-burst" id="comic-burst">¡BOOM!</div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ESTADO VACÍO CUANDO NO HAY COLECCIONES -->
+      <div class="empty-showcase-container" id="empty-state" style="display: none;">
+        <div class="empty-showcase-box">
+          <div class="empty-icon-badge">📚</div>
+          <h2 class="empty-title">TU BIBLIOTECA ESTÁ LISTA</h2>
+          <p class="empty-desc">No tienes ninguna colección registrada todavía. Añade tu primera saga o personaje para comenzar la experiencia.</p>
+          <button class="read-more-btn" id="btn-empty-create-collection">
+            <span class="btn-skew-shape"></span>
+            <span class="btn-text">+ CREAR PRIMERA COLECCIÓN</span>
+            <span class="btn-glitch-line"></span>
+          </button>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- VISTA DE CATÁLOGO Y CÓMICS DE LA COLECCIÓN -->
+    <section class="collection-comics-view" id="collection-comics-view" style="display: none;">
+      <div class="collection-view-container">
+        
+        <!-- Header de la Colección -->
+        <header class="collection-view-header">
+          <div class="cv-header-nav">
+            <button class="btn-back-home" id="btn-back-to-home">
+              <span class="btn-back-arrow">←</span> INICIO
+            </button>
+            <div class="cv-order-indicator">
+              <span class="order-icon">🔤</span> Orden Alfabético (A-Z)
+            </div>
+          </div>
+
+          <div class="cv-header-content">
+            <div class="cv-header-info">
+              <div class="cv-protagonist-tag" id="cv-protagonist">SPIDER-MAN</div>
+              <h1 class="cv-title" id="cv-title">Colección</h1>
+              <p class="cv-description" id="cv-description">Sinopsis de la colección...</p>
+            </div>
+            <div class="cv-header-stats">
+              <div class="cv-stat-badge">
+                <span class="cv-stat-count" id="cv-comics-count">0</span>
+                <span class="cv-stat-label">TOMOS DISPONIBLES</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Grilla de Cómics (Manga / Comic Reader UI) -->
+        <div class="comics-catalog-grid" id="comics-catalog-grid">
+          <!-- Inyectado dinámicamente por JavaScript -->
+        </div>
+
+        <!-- Estado Vacío dentro de la Colección -->
+        <div class="collection-empty-comics" id="collection-empty-comics" style="display: none;">
+          <div class="empty-comics-box">
+            <div class="empty-icon">📁</div>
+            <h3 class="empty-comics-title">NO SE ENCONTRARON CÓMICS EN ESTA COLECCIÓN</h3>
+            <p class="empty-comics-desc">Coloca archivos <code>.cbz</code> o <code>.cbr</code> en la carpeta asignada o presiona re-escanear.</p>
+            <button class="btn-rescan-folder" id="btn-rescan-collection">🔄 Re-escanear Carpeta</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- BOTTOM CAROUSEL / SELECTOR DOCK -->
+    <footer class="bottom-dock">
+      <div class="dock-shelf">
+        <div class="dock-track" id="dock-track">
+          <!-- Tarjetas dinámicas inyectadas por JavaScript -->
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- 1. MULTIVERSE DOSSIER MODAL -->
+  <div class="dossier-modal-overlay" id="dossier-modal">
+    <div class="dossier-dialog">
+      <button class="dossier-close-btn modal-close-trigger" title="Cerrar">✕</button>
+      
+      <div class="dossier-header-bar">
+        <span class="universe-badge" id="modal-universe">COLECCIÓN</span>
+        <h2 class="dossier-hero-name" id="modal-name">SPIDER-MAN</h2>
+        <span class="dossier-alias" id="modal-alias">// DOSSIER CLASIFICADO</span>
+      </div>
+
+      <div class="dossier-body-grid">
+        <div class="dossier-panel panel-left">
+          <div class="dossier-panel-title">// DETALLES DE LA COLECCIÓN</div>
+          <p class="dossier-bio-full" id="modal-bio-full"></p>
+          
+          <div class="dossier-stats-table">
+            <div class="stat-row">
+              <span class="stat-key">PROTAGONISTA:</span>
+              <span class="stat-val" id="stat-protagonist">Miles Morales</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-key">TOTAL CÓMICS:</span>
+              <span class="stat-val" id="stat-comics-count">0 tomos</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-key">REGISTRO:</span>
+              <span class="stat-val" id="stat-created">2026-09-16</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="dossier-panel panel-right">
+          <div class="dossier-panel-title">// TOMOS DISPONIBLES</div>
+          <div class="dossier-comics-list" id="dossier-comics-list">
+            <!-- Cómics de la colección -->
+          </div>
+
+          <div class="dossier-actions-row">
+            <button class="dimension-jump-modal-btn" id="btn-edit-current-collection">
+              <span>EDITAR COLECCIÓN</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. MODAL FORMULARIO DE COLECCIÓN (CREAR / EDITAR) -->
+  <div class="dossier-modal-overlay" id="collection-form-modal">
+    <div class="dossier-dialog form-dialog">
+      <button class="dossier-close-btn modal-close-trigger" title="Cerrar">✕</button>
+      
+      <div class="dossier-header-bar">
+        <h2 class="dossier-hero-name" id="form-modal-title">NUEVA COLECCIÓN</h2>
+      </div>
+
+      <form id="collection-edit-form" class="comic-form">
+        <input type="hidden" id="form-collection-id" value="0">
+
+        <div class="form-group">
+          <label for="form-name">Nombre de la Colección *</label>
+          <input type="text" id="form-name" required maxlength="100" placeholder="Ej. Spider-Man: Into the Spider-Verse">
+        </div>
+
+        <div class="form-group">
+          <label for="form-protagonist">Nombre del Protagonista / Héroe (Bloque Rojo, máx 25 car.) *</label>
+          <input type="text" id="form-protagonist" maxlength="25" placeholder="Ej. SPIDER-MAN, BATMAN, GWEN">
+        </div>
+
+        <div class="form-group">
+          <label for="form-desc">Sinopsis / Descripción (máx 600 car.)</label>
+          <textarea id="form-desc" rows="3" maxlength="600" placeholder="Breve descripción cinemática de la colección..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="form-comics-path">Ruta / Carpeta donde están los Cómics (.cbz, .cbr) *</label>
+          <div class="file-picker-box">
+            <input type="text" id="form-comics-path" placeholder="C:/MisComics/Batman (o presiona Buscar Carpeta...)">
+            <button type="button" class="btn-picker" id="btn-pick-comics-folder">Buscar Carpeta...</button>
+          </div>
+          <small class="form-hint" style="color: #9ca3af; font-size: 11px; margin-top: 4px; display: block;">
+            Los archivos .cbz y .cbr dentro de esta ubicación se indexarán automáticamente en la colección.
+          </small>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>Imagen Panorámica (Fondo 16:9)</label>
+            <div class="file-picker-box">
+              <input type="text" id="form-bg-path" readonly placeholder="assets/city_bg.jpg">
+              <button type="button" class="btn-picker" id="btn-pick-bg">Buscar...</button>
+            </div>
+          </div>
+
+          <div class="form-group flex-1">
+            <label>Arte de Personaje (Transparente)</label>
+            <div class="file-picker-box">
+              <input type="text" id="form-hero-path" readonly placeholder="assets/miles_hero.png">
+              <button type="button" class="btn-picker" id="btn-pick-hero">Buscar...</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn-cancel modal-close-trigger">Cancelar</button>
+          <button type="submit" class="btn-save" id="btn-save-collection">
+            <span class="btn-save-spinner" id="btn-save-spinner" style="display: none;"></span>
+            <span id="btn-save-text">Guardar Colección</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3. MODAL DE CÓDIGO QR Y SERVIDOR LOCAL -->
+  <div class="dossier-modal-overlay" id="qr-modal">
+    <div class="dossier-dialog qr-dialog">
+      <button class="dossier-close-btn modal-close-trigger" title="Cerrar">✕</button>
+      <div class="dossier-header-bar">
+        <h2 class="dossier-hero-name">LECTURA REMOTA EN TU MÓVIL</h2>
+      </div>
+      <div class="qr-body">
+        <p class="qr-desc">Escanea este código QR con la cámara de tu teléfono o tablet conectada a la misma red Wi-Fi:</p>
+        <div class="qr-display-box" id="qr-code-container">
+          <!-- SVG QR inyectado -->
+        </div>
+        <p class="qr-url-text" id="qr-url-text">http://192.168.1.X:8080</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. MODAL DE DISPOSITIVOS DE CONFIANZA -->
+  <div class="dossier-modal-overlay" id="devices-modal">
+    <div class="dossier-dialog">
+      <button class="dossier-close-btn modal-close-trigger" title="Cerrar">✕</button>
+      <div class="dossier-header-bar">
+        <h2 class="dossier-hero-name">DISPOSITIVOS DE CONFIANZA</h2>
+      </div>
+      <div class="devices-body">
+        <div class="devices-add-row">
+          <input type="text" id="input-new-device-name" placeholder="Nombre del dispositivo (ej. iPad de Samuel)">
+          <button type="button" id="btn-add-device" class="btn-picker">+ Autorizar</button>
+        </div>
+        <div class="devices-list" id="devices-list-container">
+          <!-- Listado de dispositivos -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. VISOR DE LECTURA DE CÓMIC EMBEBIDO (READER) -->
+  <div class="comic-reader-overlay" id="comic-reader">
+    <div class="reader-top-bar">
+      <button id="reader-close-btn" class="reader-btn">✕ Salir</button>
+      <span class="reader-title" id="reader-comic-title">Título del Cómic</span>
+      <div class="reader-page-indicator">
+        <span id="reader-current-page">1</span> / <span id="reader-total-pages">1</span>
+      </div>
+    </div>
+
+    <div class="reader-viewport" id="reader-viewport">
+      <img id="reader-page-img" src="" alt="Página de cómic">
+    </div>
+
+    <div class="reader-bottom-nav">
+      <button id="reader-prev-btn" class="reader-nav-btn">◀ Anterior</button>
+      <button id="reader-next-btn" class="reader-nav-btn">Siguiente ▶</button>
+    </div>
+
+    <!-- Panel de finalización del tomo -->
+    <div class="reader-finish-overlay" id="reader-finish-overlay">
+      <div class="reader-finish-box">
+        <div class="finish-icon">🎉</div>
+        <h3 class="finish-title">¡HAS COMPLETADO ESTE TOMO!</h3>
+        <p class="finish-comic-name" id="finish-current-comic-name">Título del Cómic</p>
+        <div class="finish-actions">
+          <button class="finish-btn btn-next-comic" id="btn-reader-next-comic">Siguiente Tomo ▶</button>
+          <button class="finish-btn btn-back-grid" id="btn-reader-back-grid">Volver a la Colección</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -81,7 +81,7 @@ impl ComicRepository for SqliteComicRepository {
         let rows = sqlx::query(
             "SELECT id, collection_id, title, file_path, file_type, year, issue_number, saga, cover_data, page_count, created_at, updated_at
              FROM comics WHERE collection_id = ?
-             ORDER BY COALESCE(saga, ''), COALESCE(issue_number, 0), title"
+             ORDER BY title COLLATE NOCASE ASC, COALESCE(issue_number, 0) ASC"
         )
         .bind(collection_id)
         .fetch_all(&self.pool)
@@ -203,7 +203,7 @@ impl ComicRepository for SqliteComicRepository {
 #[async_trait]
 impl CollectionRepository for SqliteComicRepository {
     async fn get_all(&self) -> Result<Vec<Collection>, RepositoryError> {
-        let rows = sqlx::query("SELECT id, name, icon_data, created_at FROM collections ORDER BY name")
+        let rows = sqlx::query("SELECT id, name, protagonist, icon_data, created_at, description, background_image_path, hero_image_path FROM collections ORDER BY name")
             .fetch_all(&self.pool)
             .await
             .map_err(|e| RepositoryError::DatabaseError(e.to_string()))?;
@@ -213,6 +213,10 @@ impl CollectionRepository for SqliteComicRepository {
             .map(|r| Collection {
                 id: r.get("id"),
                 name: r.get("name"),
+                protagonist: r.get("protagonist"),
+                description: r.get("description"),
+                background_image_path: r.get("background_image_path"),
+                hero_image_path: r.get("hero_image_path"),
                 icon_data: r.get("icon_data"),
                 created_at: Utc::now(),
             })
@@ -220,7 +224,7 @@ impl CollectionRepository for SqliteComicRepository {
     }
 
     async fn get_by_id(&self, id: i64) -> Result<Option<Collection>, RepositoryError> {
-        let row = sqlx::query("SELECT id, name, icon_data, created_at FROM collections WHERE id = ?")
+        let row = sqlx::query("SELECT id, name, protagonist, icon_data, created_at, description, background_image_path, hero_image_path FROM collections WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await
@@ -229,9 +233,40 @@ impl CollectionRepository for SqliteComicRepository {
         Ok(row.map(|r| Collection {
             id: r.get("id"),
             name: r.get("name"),
+            protagonist: r.get("protagonist"),
+            description: r.get("description"),
+            background_image_path: r.get("background_image_path"),
+            hero_image_path: r.get("hero_image_path"),
             icon_data: r.get("icon_data"),
             created_at: Utc::now(),
         }))
+    }
+
+    async fn get_recent(&self, limit: usize) -> Result<Vec<Collection>, RepositoryError> {
+        let rows = sqlx::query(
+            "SELECT id, name, protagonist, icon_data, created_at, description, background_image_path, hero_image_path 
+             FROM collections 
+             ORDER BY datetime(created_at) DESC, id DESC 
+             LIMIT ?"
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::DatabaseError(e.to_string()))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| Collection {
+                id: r.get("id"),
+                name: r.get("name"),
+                protagonist: r.get("protagonist"),
+                description: r.get("description"),
+                background_image_path: r.get("background_image_path"),
+                hero_image_path: r.get("hero_image_path"),
+                icon_data: r.get("icon_data"),
+                created_at: Utc::now(),
+            })
+            .collect())
     }
 
     async fn create(&self, name: &str) -> Result<i64, RepositoryError> {
@@ -243,14 +278,42 @@ impl CollectionRepository for SqliteComicRepository {
         Ok(result.last_insert_rowid() as i64)
     }
 
+    async fn create_with_details(
+        &self,
+        name: &str,
+        protagonist: Option<&str>,
+        description: Option<&str>,
+        background_image_path: Option<&str>,
+        hero_image_path: Option<&str>,
+    ) -> Result<i64, RepositoryError> {
+        let result = sqlx::query(
+            "INSERT INTO collections (name, protagonist, description, background_image_path, hero_image_path) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(name)
+        .bind(protagonist)
+        .bind(description)
+        .bind(background_image_path)
+        .bind(hero_image_path)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::DatabaseError(e.to_string()))?;
+        Ok(result.last_insert_rowid() as i64)
+    }
+
     async fn update(&self, collection: &Collection) -> Result<(), RepositoryError> {
-        sqlx::query("UPDATE collections SET name = ?, icon_data = ? WHERE id = ?")
-            .bind(&collection.name)
-            .bind(&collection.icon_data)
-            .bind(collection.id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| RepositoryError::DatabaseError(e.to_string()))?;
+        sqlx::query(
+            "UPDATE collections SET name = ?, protagonist = ?, icon_data = ?, description = ?, background_image_path = ?, hero_image_path = ? WHERE id = ?"
+        )
+        .bind(&collection.name)
+        .bind(&collection.protagonist)
+        .bind(&collection.icon_data)
+        .bind(&collection.description)
+        .bind(&collection.background_image_path)
+        .bind(&collection.hero_image_path)
+        .bind(collection.id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| RepositoryError::DatabaseError(e.to_string()))?;
         Ok(())
     }
 
@@ -281,7 +344,7 @@ impl CollectionRepository for SqliteComicRepository {
     }
 
     async fn add_path(&self, collection_id: i64, path: &str) -> Result<i64, RepositoryError> {
-        let result = sqlx::query("INSERT INTO collection_paths (collection_id, path) VALUES (?, ?)")
+        let result = sqlx::query("INSERT INTO collection_paths (collection_id, path) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET collection_id = excluded.collection_id")
             .bind(collection_id)
             .bind(path)
             .execute(&self.pool)
@@ -411,3 +474,59 @@ impl ProgressRepository for SqliteComicRepository {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::outbound::persistence::schema::initialize_schema;
+
+    #[tokio::test]
+    async fn test_create_and_get_recent_collections() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("Pool en memoria");
+
+        initialize_schema(&pool).await.expect("Schema inicializado");
+
+        let repo = SqliteComicRepository::new(pool);
+
+        let id1 = repo
+            .create_with_details("Coleccion Alfa", Some("ALFA"), Some("Sinopsis Alfa"), Some("bg_alfa.png"), Some("hero_alfa.png"))
+            .await
+            .expect("Creado 1");
+
+        let id2 = repo
+            .create_with_details("Coleccion Beta", Some("BETA"), Some("Sinopsis Beta"), None, None)
+            .await
+            .expect("Creado 2");
+
+        let recent = repo.get_recent(5).await.expect("Recientes");
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].id, id2); // Más reciente primero
+        assert_eq!(recent[0].name, "Coleccion Beta");
+        assert_eq!(recent[0].protagonist.as_deref(), Some("BETA"));
+        assert_eq!(recent[1].id, id1);
+        assert_eq!(recent[1].name, "Coleccion Alfa");
+        assert_eq!(recent[1].protagonist.as_deref(), Some("ALFA"));
+        assert_eq!(recent[1].background_image_path.as_deref(), Some("bg_alfa.png"));
+        assert_eq!(recent[1].hero_image_path.as_deref(), Some("hero_alfa.png"));
+
+        // Probar update
+        let mut col = recent[0].clone();
+        col.protagonist = Some("BETA-HERO".to_string());
+        col.description = Some("Sinopsis Beta Actualizada".to_string());
+        col.background_image_path = Some("bg_beta.png".to_string());
+        repo.update(&col).await.expect("Update exitoso");
+
+        let updated = crate::domain::ports::CollectionRepository::get_by_id(&repo, id2)
+            .await
+            .expect("Obtenido")
+            .expect("Existe");
+        assert_eq!(updated.protagonist.as_deref(), Some("BETA-HERO"));
+        assert_eq!(updated.description.as_deref(), Some("Sinopsis Beta Actualizada"));
+        assert_eq!(updated.description.as_deref(), Some("Sinopsis Beta Actualizada"));
+        assert_eq!(updated.background_image_path.as_deref(), Some("bg_beta.png"));
+    }
+}
+

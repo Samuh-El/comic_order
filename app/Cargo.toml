@@ -37,7 +37,12 @@ tracing-appender = "0.2"
 unrar = "0.5"
 notify = "6"
 async-trait = "0.1"
-thiserror = "1"
+thiserror = "2"
+# Tauri GUI
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

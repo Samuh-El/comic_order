@@ -126,6 +126,10 @@ mod tests {
             Collection {
                 id: 1,
                 name: "Marvel <Heroes>".to_string(),
+                protagonist: None,
+                description: None,
+                background_image_path: None,
+                hero_image_path: None,
                 icon_data: None,
                 created_at: Utc::now(),
             },
@@ -142,6 +146,10 @@ mod tests {
         let col = Collection {
             id: 1,
             name: "Batman Series".to_string(),
+            protagonist: None,
+            description: None,
+            background_image_path: None,
+            hero_image_path: None,
             icon_data: None,
             created_at: Utc::now(),
         };

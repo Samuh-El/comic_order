@@ -6,3 +6,5 @@ pub mod reader;
 pub mod metadata_editor;
 pub mod collection_editor;
 pub mod trusted_devices;
+pub mod hero_showcase;
+pub mod top_bar;

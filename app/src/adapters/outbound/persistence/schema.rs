@@ -14,15 +14,31 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS collections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
+            protagonist TEXT NULL,
             icon_data BLOB NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            description TEXT NULL,
+            background_image_path TEXT NULL,
+            hero_image_path TEXT NULL
         );"
     )
     .execute(pool)
     .await?;
 
-    // Migración idempotente para icon_data
+    // Migraciones idempotentes para columnas extendidas
+    let _ = sqlx::query("ALTER TABLE collections ADD COLUMN protagonist TEXT")
+        .execute(pool)
+        .await;
     let _ = sqlx::query("ALTER TABLE collections ADD COLUMN icon_data BLOB")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE collections ADD COLUMN description TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE collections ADD COLUMN background_image_path TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE collections ADD COLUMN hero_image_path TEXT")
         .execute(pool)
         .await;
 

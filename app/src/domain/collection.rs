@@ -10,6 +10,10 @@ use crate::domain::errors::DomainError;
 pub struct Collection {
     pub id: i64,
     pub name: String,
+    pub protagonist: Option<String>,
+    pub description: Option<String>,
+    pub background_image_path: Option<String>,
+    pub hero_image_path: Option<String>,
     #[serde(skip)]
     pub icon_data: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
@@ -33,18 +37,58 @@ impl Collection {
         Ok(Self {
             id,
             name: trimmed.to_string(),
+            protagonist: None,
+            description: None,
+            background_image_path: None,
+            hero_image_path: None,
             icon_data: None,
             created_at: Utc::now(),
         })
     }
 
+    /// Devuelve el nombre del protagonista o fallback al nombre de la colección.
+    pub fn protagonist_display(&self) -> &str {
+        self.protagonist
+            .as_deref()
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or(&self.name)
+    }
+
+    /// Trunca los campos de texto según las reglas de negocio (protagonista: 25, descripción: 600).
+    pub fn truncate_fields(&mut self) {
+        if let Some(protagonist) = &self.protagonist {
+            if protagonist.chars().count() > 25 {
+                self.protagonist = Some(protagonist.chars().take(25).collect());
+            }
+        }
+        if let Some(desc) = &self.description {
+            if desc.chars().count() > 600 {
+                self.description = Some(desc.chars().take(600).collect());
+            }
+        }
+    }
+
     /// Valida los invariantes de negocio de la colección.
     pub fn validate(&self) -> Result<(), DomainError> {
-        if self.name.trim().is_empty() || self.name.len() > 100 {
+        if self.name.trim().is_empty() || self.name.chars().count() > 100 {
             return Err(DomainError::ValidationError(
                 "Invariante de colección inválido: el nombre debe tener entre 1 y 100 caracteres"
                     .to_string(),
             ));
+        }
+        if let Some(protagonist) = &self.protagonist {
+            if protagonist.chars().count() > 25 {
+                return Err(DomainError::ValidationError(
+                    "El nombre del superhéroe/protagonista no puede exceder 25 caracteres".to_string(),
+                ));
+            }
+        }
+        if let Some(desc) = &self.description {
+            if desc.chars().count() > 600 {
+                return Err(DomainError::ValidationError(
+                    "La descripción de la colección no puede exceder 600 caracteres".to_string(),
+                ));
+            }
         }
         Ok(())
     }
@@ -96,5 +140,47 @@ mod tests {
         let long_name = "A".repeat(101);
         let res = Collection::new(1, long_name);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_collection_with_valid_description() {
+        let mut coll = Collection::new(1, "Batman".to_string()).expect("Debería crearse correctamente");
+        coll.protagonist = Some("BATMAN".to_string());
+        coll.description = Some("El caballero de la noche protege Gotham.".to_string());
+        coll.background_image_path = Some("data/media/collections/batman_bg.png".to_string());
+        coll.hero_image_path = Some("data/media/collections/batman_hero.png".to_string());
+        assert_eq!(coll.protagonist_display(), "BATMAN");
+        assert!(coll.validate().is_ok());
+    }
+
+    #[test]
+    fn test_collection_protagonist_fallback() {
+        let coll = Collection::new(1, "Spider-Man".to_string()).expect("Debería crearse correctamente");
+        assert_eq!(coll.protagonist_display(), "Spider-Man");
+    }
+
+    #[test]
+    fn test_collection_with_too_long_description_fails() {
+        let mut coll = Collection::new(1, "Spiderman".to_string()).expect("Debería crearse correctamente");
+        coll.description = Some("A".repeat(601));
+        assert!(coll.validate().is_err());
+    }
+
+    #[test]
+    fn test_collection_with_too_long_protagonist_fails() {
+        let mut coll = Collection::new(1, "Hero".to_string()).expect("Debería crearse correctamente");
+        coll.protagonist = Some("A".repeat(26));
+        assert!(coll.validate().is_err());
+    }
+
+    #[test]
+    fn test_collection_truncate_fields() {
+        let mut coll = Collection::new(1, "Hero".to_string()).expect("Debería crearse correctamente");
+        coll.protagonist = Some("A".repeat(30));
+        coll.description = Some("B".repeat(700));
+        coll.truncate_fields();
+        assert_eq!(coll.protagonist.as_ref().unwrap().len(), 25);
+        assert_eq!(coll.description.as_ref().unwrap().len(), 600);
+        assert!(coll.validate().is_ok());
     }
 }

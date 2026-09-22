@@ -1,6 +1,18 @@
 //! Generación de códigos QR matriciales y detección de IP en red local (LAN).
 
 use qrcode::QrCode;
+use qrcode::render::svg;
+
+/// Genera un código QR en formato SVG como cadena de texto.
+pub fn generate_qr_svg(url: &str) -> String {
+    if let Ok(code) = QrCode::new(url.as_bytes()) {
+        code.render::<svg::Color>()
+            .min_dimensions(200, 200)
+            .build()
+    } else {
+        String::new()
+    }
+}
 
 /// Genera un código QR como datos de píxeles sin procesar (RGBA) para su visualización en Iced.
 ///

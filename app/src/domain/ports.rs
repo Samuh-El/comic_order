@@ -49,7 +49,16 @@ pub trait ComicRepository: Send + Sync {
 pub trait CollectionRepository: Send + Sync {
     async fn get_all(&self) -> Result<Vec<Collection>, RepositoryError>;
     async fn get_by_id(&self, id: i64) -> Result<Option<Collection>, RepositoryError>;
+    async fn get_recent(&self, limit: usize) -> Result<Vec<Collection>, RepositoryError>;
     async fn create(&self, name: &str) -> Result<i64, RepositoryError>;
+    async fn create_with_details(
+        &self,
+        name: &str,
+        protagonist: Option<&str>,
+        description: Option<&str>,
+        background_image_path: Option<&str>,
+        hero_image_path: Option<&str>,
+    ) -> Result<i64, RepositoryError>;
     async fn update(&self, collection: &Collection) -> Result<(), RepositoryError>;
     async fn delete(&self, id: i64) -> Result<(), RepositoryError>;
     async fn get_paths(&self, collection_id: i64) -> Result<Vec<CollectionPath>, RepositoryError>;
